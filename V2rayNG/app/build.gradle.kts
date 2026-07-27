@@ -10,7 +10,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.v2ray.ang"
+        applicationId = "com.patterniha.pattng"
         minSdk = 24
         targetSdk = 37
         versionCode = 736
