@@ -158,6 +158,7 @@ jobs:
         with:
           file: release-files/*
           tag: ${{ inputs.release_tag }}
+          target_commit: ${{ github.sha }}
           file_glob: true
           prerelease: true
           overwrite: true
