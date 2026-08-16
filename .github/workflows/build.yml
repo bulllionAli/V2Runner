@@ -71,7 +71,7 @@ jobs:
     - name: Bump AndroidLibXrayLite (optional)
       if: github.event_name == 'workflow_dispatch' && inputs.core_tag != ''
       run: |
-        curl -fsSL "https://api.github.com/repos/patterniha/AndroidLibXrayLite/releases/tags/${{ inputs.core_tag }}" | grep -q '"name": "libv2ray.aar"'           || { echo "::error::patterniha/AndroidLibXrayLite has no release '${{ inputs.core_tag }}' with a libv2ray.aar asset - create that release first"; exit 1; }
+        curl -fsSL -H "Authorization: Bearer ${{ github.token }}" "https://api.github.com/repos/patterniha/AndroidLibXrayLite/releases/tags/${{ inputs.core_tag }}" | grep -q '"name": "libv2ray.aar"'           || { echo "::error::patterniha/AndroidLibXrayLite has no release '${{ inputs.core_tag }}' with a libv2ray.aar asset - create that release first"; exit 1; }
         pushd AndroidLibXrayLite
         git fetch origin --tags
         git checkout "${{ inputs.core_tag }}"
