@@ -6,6 +6,10 @@ on:
       release_tag:
         required: false
         type: string
+      core_tag:
+        description: 'Optional: AndroidLibXrayLite release tag to bump to first (e.g. v26.9.1-P)'
+        required: false
+        type: string
   push:
     branches:
       - master
@@ -63,6 +67,27 @@ jobs:
     - name: Copy libhevtun
       run: |
         cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
+
+    - name: Bump AndroidLibXrayLite (optional)
+      if: github.event_name == 'workflow_dispatch' && inputs.core_tag != ''
+      run: |
+        curl -fsIL -o /dev/null "https://github.com/patterniha/AndroidLibXrayLite/releases/download/${{ inputs.core_tag }}/libv2ray.aar"           || { echo "::error::patterniha/AndroidLibXrayLite has no libv2ray.aar release for tag '${{ inputs.core_tag }}' - create that release first"; exit 1; }
+        pushd AndroidLibXrayLite
+        git fetch origin --tags
+        git checkout "${{ inputs.core_tag }}"
+        DESCRIBED=$(git describe --tags --abbrev=0)
+        if [ "$DESCRIBED" != "${{ inputs.core_tag }}" ]; then
+          echo "::error::checked-out commit describes as '$DESCRIBED', not '${{ inputs.core_tag }}'"
+          exit 1
+        fi
+        popd
+        if ! git diff --quiet AndroidLibXrayLite; then
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add AndroidLibXrayLite
+          git commit -m "chore: bump AndroidLibXrayLite to ${{ inputs.core_tag }}"
+          git push origin HEAD:${{ github.ref_name }}
+        fi
 
     - name: Fetch AndroidLibXrayLite tag
       run: |
