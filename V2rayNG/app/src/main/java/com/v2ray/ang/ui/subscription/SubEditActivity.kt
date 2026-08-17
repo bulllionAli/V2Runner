@@ -134,11 +134,11 @@ fun SubEditScreen(
     //val context = LocalContext.current
     var remarks by rememberSaveable { mutableStateOf(initial.remarks.orEmpty()) }
     var url by rememberSaveable { mutableStateOf(initial.url.orEmpty()) }
-    var userAgent by rememberSaveable { mutableStateOf(initial.userAgent.orEmpty()) }
-    var requestHeaders by rememberSaveable { mutableStateOf(initial.requestHeaders.orEmpty()) }
-    var filter by rememberSaveable { mutableStateOf(initial.filter ?: "") }
-    var enabled by rememberSaveable { mutableStateOf(initial.enabled) }
-    var autoUpdate by rememberSaveable { mutableStateOf(initial.autoUpdate) }
+    val userAgent = initial.userAgent.orEmpty()
+    val requestHeaders = initial.requestHeaders.orEmpty()
+    val filter = initial.filter ?: ""
+    val enabled = initial.enabled
+    var autoUpdate by rememberSaveable { mutableStateOf(true) }
     var updateInterval by rememberSaveable { mutableStateOf(initial.updateInterval.toString()) }
     var allowInsecureUrl by rememberSaveable { mutableStateOf(initial.allowInsecureUrl) }
     var prevProfile by rememberSaveable { mutableStateOf(initial.prevProfile ?: "") }
@@ -198,14 +198,6 @@ fun SubEditScreen(
         ) {
             FormTextField(stringResource(R.string.sub_setting_remarks), remarks, { remarks = it })
             FormTextField(stringResource(R.string.sub_setting_url), url, { url = it })
-            FormTextField(stringResource(R.string.sub_setting_user_agent), userAgent, { userAgent = it })
-            FormTextField(stringResource(R.string.sub_setting_request_headers), requestHeaders, { requestHeaders = it })
-            FormTextField(stringResource(R.string.sub_setting_filter), filter, { filter = it })
-            SettingsSwitchItem(
-                title = stringResource(R.string.sub_setting_enable),
-                checked = enabled,
-                onCheckedChange = { enabled = it }
-            )
 
             SettingsSwitchItem(
                 title = stringResource(R.string.sub_auto_update),
