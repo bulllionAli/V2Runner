@@ -229,11 +229,6 @@ abstract class BaseServerActivity : BaseComponentActivity() {
                     keyboardType = KeyboardType.Number
                 )
             }
-            FormTextField(
-                stringResource(R.string.server_lab_final_mask),
-                state.finalMask,
-                { state.finalMask = it }
-            )
             if (state.network == NetworkType.WS.type || state.network == NetworkType.XHTTP.type) {
                 FormDropdownField(
                     stringResource(R.string.server_lab_browser_dialer),
@@ -288,11 +283,6 @@ abstract class BaseServerActivity : BaseComponentActivity() {
                     state.alpn,
                     options.alpnOptions,
                     { state.alpn = it }
-                )
-                FormTextField(
-                    stringResource(R.string.server_lab_cipher_suites),
-                    state.cipherSuites,
-                    { state.cipherSuites = it }
                 )
                 FormTextField(
                     stringResource(R.string.server_lab_ech_config_list),

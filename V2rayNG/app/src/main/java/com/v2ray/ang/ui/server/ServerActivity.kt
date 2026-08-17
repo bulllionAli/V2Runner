@@ -468,7 +468,6 @@ fun ServerScreen(
                 item { FormTextField(stringResource(R.string.server_lab_kcp_mtu), kcpMtu, { kcpMtu = it }, keyboardType = KeyboardType.Number) }
                 item { FormTextField(stringResource(R.string.server_lab_kcp_tti), kcpTti, { kcpTti = it }, keyboardType = KeyboardType.Number) }
             }
-            item { FormTextField(stringResource(R.string.server_lab_final_mask), finalMask, { finalMask = it }) }
             if (network == NetworkType.WS.type || network == NetworkType.XHTTP.type) {
                 item { FormDropdownField(stringResource(R.string.server_lab_browser_dialer), browserDialerMode, browserDialerOptions, { browserDialerMode = it }) }
             }
@@ -479,7 +478,6 @@ fun ServerScreen(
                 if (streamSecurity == TLS) {
                     item { SettingsSwitchItem(title = stringResource(R.string.server_lab_allow_insecure), checked = allowInsecure, onCheckedChange = { allowInsecure = it }) }
                     item { FormDropdownField(stringResource(R.string.server_lab_stream_alpn), alpn, alpnOptions, { alpn = it }) }
-                    item { FormTextField(stringResource(R.string.server_lab_cipher_suites), cipherSuites, { cipherSuites = it }) }
                     item { FormTextField(stringResource(R.string.server_lab_ech_config_list), echConfigList, { echConfigList = it }) }
                     item { FormTextField(stringResource(R.string.server_lab_verify_peer_cert_by_name), verifyPeerCertByName, { verifyPeerCertByName = it }) }
                     item { FormTextField(stringResource(R.string.server_lab_pinned_ca256), pinnedCA256, { pinnedCA256 = it }) }
