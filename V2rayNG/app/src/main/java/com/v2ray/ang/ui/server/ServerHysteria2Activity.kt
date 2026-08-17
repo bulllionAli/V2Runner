@@ -96,12 +96,6 @@ class ServerHysteria2Activity : BaseServerActivity() {
             state.pinnedCA256,
             { state.pinnedCA256 = it }
         )
-
-        FormTextField(
-            stringResource(R.string.server_lab_final_mask),
-            state.finalMask,
-            { state.finalMask = it }
-        )
     }
 }
 

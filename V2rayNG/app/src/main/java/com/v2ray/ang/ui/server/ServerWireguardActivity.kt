@@ -67,12 +67,6 @@ class ServerWireguardActivity : BaseServerActivity() {
             { state.mtu = it },
             keyboardType = KeyboardType.Number
         )
-
-        FormTextField(
-            stringResource(R.string.server_lab_final_mask),
-            state.finalMask,
-            { state.finalMask = it }
-        )
     }
 }
 
