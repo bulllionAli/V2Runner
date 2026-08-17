@@ -1,95 +1,52 @@
 [
   {
-    "remarks": "阻断udp443",
+    "enabled": true,
+    "id": "7a4e45e3-98c9-4978-b335-1090f9d64c95",
+    "locked": false,
+    "network": "udp",
     "outboundTag": "block",
     "port": "443",
-    "network": "udp"
+    "remarks": "Block udp443"
   },
   {
-    "remarks": "代理Google",
-    "outboundTag": "proxy",
-    "domain": [
-      "geosite:google"
-    ]
-  },
-  {
-    "remarks": "绕过局域网IP",
-    "outboundTag": "direct",
+    "enabled": true,
+    "id": "11f8bd68-cd32-42d3-a498-84cd4d650138",
     "ip": [
       "geoip:private"
-    ]
+    ],
+    "locked": false,
+    "outboundTag": "direct",
+    "remarks": "Direct LAN IP"
   },
   {
-    "remarks": "绕过局域网域名",
-    "outboundTag": "direct",
     "domain": [
       "geosite:private"
-    ]
+    ],
+    "enabled": true,
+    "id": "8ba84d11-4b37-4b6f-a386-8123674c1ad5",
+    "locked": false,
+    "outboundTag": "direct",
+    "remarks": "Direct LAN domains"
   },
   {
-    "remarks": "绕过中国公共DNSIP",
-    "outboundTag": "direct",
-    "ip": [
-      "223.5.5.5",
-      "223.6.6.6",
-      "2400:3200::1",
-      "2400:3200:baba::1",
-      "119.29.29.29",
-      "1.12.12.12",
-      "120.53.53.53",
-      "2402:4e00::",
-      "2402:4e00:1::",
-      "180.76.76.76",
-      "2400:da00::6666",
-      "114.114.114.114",
-      "114.114.115.115",
-      "114.114.114.119",
-      "114.114.115.119",
-      "114.114.114.110",
-      "114.114.115.110",
-      "180.184.1.1",
-      "180.184.2.2",
-      "101.226.4.6",
-      "218.30.118.6",
-      "123.125.81.6",
-      "140.207.198.6",
-      "1.2.4.8",
-      "210.2.4.8",
-      "52.80.66.66",
-      "117.50.22.22",
-      "2400:7fc0:849e:200::4",
-      "2404:c2c0:85d8:901::4",
-      "117.50.10.10",
-      "52.80.52.52",
-      "2400:7fc0:849e:200::8",
-      "2404:c2c0:85d8:901::8",
-      "117.50.60.30",
-      "52.80.60.30"
-    ]
-  },
-  {
-    "remarks": "绕过中国公共DNS域名",
-    "outboundTag": "direct",
     "domain": [
-      "domain:alidns.com",
-      "domain:doh.pub",
-      "domain:dot.pub",
-      "domain:360.cn",
-      "domain:onedns.net"
-    ]
+      "domain:ir",
+      "geosite:category-ir"
+    ],
+    "enabled": true,
+    "id": "77360bfd-269e-43cb-b325-7d73d0ed4807",
+    "locked": false,
+    "outboundTag": "direct",
+    "remarks": "Bypass Iran domains"
   },
   {
-    "remarks": "绕过中国IP",
-    "outboundTag": "direct",
+    "enabled": true,
+    "id": "4843bf88-8ef9-41c1-8a7f-5f6f8788c015",
     "ip": [
-      "geoip:cn"
-    ]
-  },
-  {
-    "remarks": "绕过中国域名",
+      "geoip:ir"
+    ],
+    "locked": false,
     "outboundTag": "direct",
-    "domain": [
-      "geosite:cn"
-    ]
+    "remarks": "Bypass Iran IP"
   }
 ]
