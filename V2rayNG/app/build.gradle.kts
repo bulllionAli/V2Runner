@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "bond.v2runner"
+    namespace = "com.v2ray.ang"
     compileSdk = 37
 
     defaultConfig {
