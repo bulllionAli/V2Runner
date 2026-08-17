@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">v2rayNG</string>
+    <string name="app_name" translatable="false">v2Runner</string>
     <string name="app_widget_name">Switch</string>
     <string name="app_tile_name">Switch</string>
     <string name="app_tile_first_use">Add a profile in the app before using this feature.</string>
@@ -127,7 +127,7 @@
     <string name="server_lab_bandwidth_up">Upload bandwidth (supported units: k/m/g/t)</string>
     <string name="server_lab_xhttp_mode">XHTTP Mode</string>
     <string name="server_lab_xhttp_extra">XHTTP Extra raw JSON, format: { XHTTPObject }</string>
-    <string name="server_lab_final_mask">finalMask raw JSON, format: { FinalMaskObject }</string>
+    <string name="server_lab_final_mask">finalMask</string>
     <string name="server_lab_ech_config_list" translatable="false">echConfigList</string>
     <string name="server_lab_verify_peer_cert_by_name">Verify peer certificate by name</string>
     <string name="server_lab_pinned_ca256">Certificate fingerprint (SHA-256)</string>
