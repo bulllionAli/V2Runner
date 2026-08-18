@@ -400,7 +400,13 @@ fun ServerListItem(
             }
             Spacer(modifier = Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(typeDescription, style = MaterialTheme.typography.bodySmall, color = colorProtocolText, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    typeDescription,
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = MaterialTheme.typography.bodySmall.fontSize * 0.7f),
+                    color = colorProtocolText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
                 Text(testResult, style = MaterialTheme.typography.bodySmall, color = if (testDelayMillis < 0L) colorPingRed else colorPing, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
