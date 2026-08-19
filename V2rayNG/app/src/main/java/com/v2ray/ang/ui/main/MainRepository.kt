@@ -282,9 +282,18 @@ class MainRepository(
         MmkvManager.decodeSubscriptions().forEach { cache ->
             if (cache.guid.isEmpty()) return@forEach // skip the synthetic "All" filter entry
             val subItem = cache.subscription
-            if (subItem.nextProfile == exitRemark) return@forEach
-            subItem.nextProfile = exitRemark
-            MmkvManager.encodeSubscription(cache.guid, subItem)
+            var changed = false
+            if (subItem.nextProfile != exitRemark) {
+                subItem.nextProfile = exitRemark
+                changed = true
+            }
+            // Self-heal: earlier builds mistakenly wrote the exit hop into prevProfile
+            // (the "Entry proxy" field). Clear it if it still holds this exit remark.
+            if (subItem.prevProfile == exitRemark) {
+                subItem.prevProfile = null
+                changed = true
+            }
+            if (changed) MmkvManager.encodeSubscription(cache.guid, subItem)
         }
     }
 
