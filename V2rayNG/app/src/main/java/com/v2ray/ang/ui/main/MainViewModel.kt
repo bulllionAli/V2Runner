@@ -284,8 +284,8 @@ class MainViewModel(
         viewModelScope.launch(ioDispatcher) {
             _uiState.update { it.copy(fixIpLoading = true) }
             try {
-                dataSource.setExitProxyConfig(config)
                 dataSource.applyExitProxyToAllServers(config)
+                dataSource.setExitProxyConfig(config)
                 _uiState.update {
                     it.copy(exitProxyConfig = config, fixIpLoading = false, showFixIpDialog = false)
                 }

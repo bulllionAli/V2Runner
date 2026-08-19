@@ -271,7 +271,7 @@ class MainRepository(
         val exitRemark = ensureExitProxyProfileImported(config)
         if (exitRemark.isNullOrEmpty()) {
             LogUtil.e(AppConfig.TAG, "Failed to import Fix IP exit proxy config, skipping chain update")
-            return@withContext
+            throw IllegalStateException("Failed to resolve imported Fix IP profile remark for ${config.link}")
         }
 
         // CoreConfigContextBuilder resolves each subscription's chain as [prevProfile ("Entry proxy"),
@@ -317,6 +317,8 @@ class MainRepository(
     private suspend fun ensureExitProxyProfileImported(config: FixedIpConfig): String? {
         SettingsManager.getServerViaRemarks(config.remark)?.let { return config.remark }
 
+        val guidsBeforeImport = getServerGuidList(AppConfig.EXIT_PROXY_POOL_SUBSCRIPTION_ID).toSet()
+
         val (importedCount, _) = AngConfigManager.importBatchConfig(
             config.link,
             AppConfig.EXIT_PROXY_POOL_SUBSCRIPTION_ID,
@@ -324,7 +326,21 @@ class MainRepository(
         )
         if (importedCount <= 0) return null
 
-        return SettingsManager.getServerViaRemarks(config.remark)?.remarks
+        // Prefer an exact remark match if the importer preserved it verbatim.
+        SettingsManager.getServerViaRemarks(config.remark)?.let { return config.remark }
+
+        // The importer may have altered/de-duplicated the remark (e.g. appended a suffix),
+        // so an exact-remark lookup can miss even though the import succeeded. Fall back to
+        // whichever guid(s) this import just added, and use that profile's actual remark
+        // instead of assuming it matches config.remark.
+        val newGuids = getServerGuidList(AppConfig.EXIT_PROXY_POOL_SUBSCRIPTION_ID).toSet() - guidsBeforeImport
+        val newGuid = newGuids.firstOrNull() ?: return null
+        val importedRemark = decodeServerConfig(newGuid)?.remarks
+        if (importedRemark.isNullOrEmpty()) {
+            LogUtil.e(AppConfig.TAG, "Imported Fix IP profile has no remark, cannot use it as an exit hop")
+            return null
+        }
+        return importedRemark
     }
 
     private fun parseFixedIpConfigs(raw: String): List<FixedIpConfig> =

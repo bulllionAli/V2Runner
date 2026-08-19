@@ -226,7 +226,7 @@ fun SubEditScreen(
             )
             FormDropdownField(
                 label = stringResource(R.string.sub_setting_next_profile),
-                placeholder = stringResource(R.string.sub_setting_pre_profile_tip),
+                placeholder = stringResource(R.string.sub_setting_exit_proxy_tip),
                 value = nextProfile,
                 options = profileSuggestions,
                 onValueChange = { nextProfile = it },
