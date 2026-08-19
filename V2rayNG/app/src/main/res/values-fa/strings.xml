@@ -340,11 +340,11 @@
     <string name="sub_setting_entry_proxy_tip">پروکسی انتخاب‌شده پیش از هر پروفایل این اشتراک، به‌عنوان حلقهٔ ورودی زنجیرهٔ پروکسی آن پروفایل اضافه می‌شود.</string>
     <string name="sub_setting_exit_proxy_tip">پروکسی انتخاب‌شده پس از هر پروفایل این اشتراک، به‌عنوان حلقهٔ خروجی زنجیرهٔ پروکسی آن پروفایل اضافه می‌شود.</string>
     <string name="toast_invalid_update_interval">بازه بروزرسانی نامعتبر است. حداقل مقدار 15 و حداکثر 1440.</string>
-    <string name="title_sub_update">به‌روزرسانی ساب</string>
+    <string name="title_sub_update">به‌روزرسانی اشتراک</string>
     <string name="title_ping_all_server">آزمایش تأخیر TCP (TCPing)</string>
     <string name="title_real_ping_all_server">تست سرعت</string>
     <string name="title_user_asset_setting">فایل های منبع جغرافیایی</string>
-    <string name="title_sort_by_test_results">مرتب‌سازی بر اساس پینگ آزمایش</string>
+    <string name="title_sort_by_test_results">مرتب‌سازی بر اساس پینگ</string>
     <string name="title_filter_config">فیلتر کردن کانفیگ‌ها</string>
     <string name="filter_config_all">همه</string>
     <string name="summary_scan_qrcode">برای باز کردن دوربین و اسکن، روی صفحه بزنید</string>
