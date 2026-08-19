@@ -15,6 +15,8 @@ import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.ServerAffiliationInfo
 import com.v2ray.ang.dto.entities.SubscriptionCache
 import com.v2ray.ang.dto.entities.SubscriptionItem
+import com.v2ray.ang.enums.EConfigType
+import com.v2ray.ang.extension.isComplexType
 import com.v2ray.ang.extension.serializable
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.AppLocaleManager
@@ -24,10 +26,15 @@ import com.v2ray.ang.handler.SubscriptionUpdater
 import com.v2ray.ang.helper.MessageHelper
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLDecoder
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainRepository(
@@ -225,4 +232,116 @@ class MainRepository(
     override fun initAssets() {
         SettingsManager.initAssets(app, app.assets)
     }
+
+    // ---------- Fix IP / Exit proxy ----------
+
+    override fun getExitProxyConfig(): FixedIpConfig? {
+        val link = MmkvManager.decodeSettingsString(AppConfig.PREF_EXIT_PROXY_LINK, "").orEmpty()
+        if (link.isEmpty()) return null
+        val remark = MmkvManager.decodeSettingsString(AppConfig.PREF_EXIT_PROXY_REMARK, "").orEmpty()
+        return FixedIpConfig(link = link, remark = remark.ifEmpty { link })
+    }
+
+    override fun setExitProxyConfig(config: FixedIpConfig?) {
+        MmkvManager.encodeSettings(AppConfig.PREF_EXIT_PROXY_LINK, config?.link.orEmpty())
+        MmkvManager.encodeSettings(AppConfig.PREF_EXIT_PROXY_REMARK, config?.remark.orEmpty())
+    }
+
+    override fun getCachedFixedIpConfigs(): List<FixedIpConfig> =
+        parseFixedIpConfigs(MmkvManager.decodeSettingsString(AppConfig.PREF_FIXED_IP_CACHE, "").orEmpty())
+
+    override suspend fun fetchFixedIpConfigs(): List<FixedIpConfig> = withContext(Dispatchers.IO) {
+        val connection = URL(AppConfig.FIXED_IP_LIST_URL).openConnection() as HttpURLConnection
+        try {
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.requestMethod = "GET"
+            val raw = connection.inputStream.bufferedReader().use { it.readText() }
+            MmkvManager.encodeSettings(AppConfig.PREF_FIXED_IP_CACHE, raw)
+            parseFixedIpConfigs(raw)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    override suspend fun applyExitProxyToAllServers(config: FixedIpConfig?): Unit = withContext(Dispatchers.IO) {
+        if (config == null) {
+            clearExitProxyFromAllServers()
+            return@withContext
+        }
+
+        val exitRemark = ensureExitProxyProfileImported(config)
+        if (exitRemark.isNullOrEmpty()) {
+            LogUtil.e(AppConfig.TAG, "Failed to import Fix IP exit proxy config, skipping chain update")
+            return@withContext
+        }
+
+        eligibleChainMemberGuids().forEach { guid ->
+            val profile = MmkvManager.decodeServerConfig(guid) ?: return@forEach
+            if (profile.remarks == exitRemark) return@forEach // never chain the exit node onto itself
+            if (profile.proxyChainProfiles == exitRemark) return@forEach
+            profile.proxyChainProfiles = exitRemark
+            MmkvManager.encodeServerConfig(guid, profile)
+        }
+    }
+
+    /** Removes any previously-applied exit-proxy hop from every server profile. */
+    private fun clearExitProxyFromAllServers() {
+        val previousRemark = getExitProxyConfig()?.remark
+        eligibleChainMemberGuids().forEach { guid ->
+            val profile = MmkvManager.decodeServerConfig(guid) ?: return@forEach
+            val chain = profile.proxyChainProfiles
+            if (chain.isNullOrEmpty()) return@forEach
+            if (previousRemark.isNullOrEmpty() || chain == previousRemark) {
+                profile.proxyChainProfiles = null
+                MmkvManager.encodeServerConfig(guid, profile)
+            }
+        }
+    }
+
+    /** Regular, single-hop server profiles that can act as (or receive) a proxy-chain hop. */
+    private fun eligibleChainMemberGuids(): List<String> =
+        MmkvManager.decodeAllServerList().filter { guid ->
+            val profile = MmkvManager.decodeServerConfig(guid)
+            profile != null &&
+                profile.configType != EConfigType.CUSTOM &&
+                profile.configType != EConfigType.POLICYGROUP &&
+                profile.configType != EConfigType.PROXYCHAIN &&
+                !profile.configType.isComplexType()
+        }
+
+    /**
+     * Ensures [config]'s link exists as an actual, decodable server profile (so it can be
+     * referenced by remark as a proxy-chain member), importing it into a reserved,
+     * never-shown-as-a-tab subscription bucket if it isn't already present. Returns the
+     * remark to use for chaining, or null if the import failed.
+     */
+    private suspend fun ensureExitProxyProfileImported(config: FixedIpConfig): String? {
+        SettingsManager.getServerViaRemarks(config.remark)?.let { return config.remark }
+
+        val (importedCount, _) = AngConfigManager.importBatchConfig(
+            config.link,
+            AppConfig.EXIT_PROXY_POOL_SUBSCRIPTION_ID,
+            false
+        )
+        if (importedCount <= 0) return null
+
+        return SettingsManager.getServerViaRemarks(config.remark)?.remarks
+    }
+
+    private fun parseFixedIpConfigs(raw: String): List<FixedIpConfig> =
+        raw.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .map { line ->
+                val hashIndex = line.indexOf('#')
+                val remark = if (hashIndex >= 0 && hashIndex < line.lastIndex) {
+                    runCatching { URLDecoder.decode(line.substring(hashIndex + 1), "UTF-8") }
+                        .getOrDefault(line.substring(hashIndex + 1))
+                } else {
+                    line
+                }
+                FixedIpConfig(link = line, remark = remark.ifBlank { line })
+            }
+            .toList()
 }

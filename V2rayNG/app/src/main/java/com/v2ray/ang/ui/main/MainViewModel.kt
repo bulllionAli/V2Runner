@@ -52,7 +52,8 @@ class MainViewModel(
             selectedGroupId = dataSource.getSelectedSubscriptionId(),
             selectedGuid = dataSource.getSelectServer(),
             confirmRemove = dataSource.getConfirmRemove(),
-            doubleColumnDisplay = dataSource.getDoubleColumnDisplay()
+            doubleColumnDisplay = dataSource.getDoubleColumnDisplay(),
+            exitProxyConfig = dataSource.getExitProxyConfig()
         )
     )
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -201,6 +202,10 @@ class MainViewModel(
                 _uiState.update { it.copy(shareQRCodeBitmap = null) }
             }
 
+            MainAction.OpenFixIpDialog -> openFixIpDialog()
+            MainAction.DismissFixIpDialog -> _uiState.update { it.copy(showFixIpDialog = false) }
+            MainAction.UpdateFixedIpList -> updateFixedIpList()
+
             MainAction.ToggleService,
             MainAction.TestCurrentServer,
             MainAction.ImportQRcode,
@@ -211,7 +216,8 @@ class MainViewModel(
             MainAction.LocateSelectedServer,
             is MainAction.EditServer,
             is MainAction.ShareClipboard,
-            is MainAction.ShareFullContent -> {
+            is MainAction.ShareFullContent,
+            is MainAction.SelectExitProxy -> {
                 // Handled by Activity via its onAction lambda
             }
         }
@@ -239,6 +245,59 @@ class MainViewModel(
                 confirmRemove = dataSource.getConfirmRemove(),
                 doubleColumnDisplay = dataSource.getDoubleColumnDisplay()
             )
+        }
+    }
+
+    // ---------- Fix IP / Exit proxy ----------
+    private fun openFixIpDialog() {
+        _uiState.update {
+            it.copy(
+                showFixIpDialog = true,
+                fixedIpConfigs = dataSource.getCachedFixedIpConfigs()
+            )
+        }
+    }
+
+    private fun updateFixedIpList() {
+        viewModelScope.launch(ioDispatcher) {
+            _uiState.update { it.copy(fixIpLoading = true) }
+            try {
+                val configs = dataSource.fetchFixedIpConfigs()
+                _uiState.update { it.copy(fixedIpConfigs = configs, fixIpLoading = false) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                LogUtil.e(AppConfig.TAG, "Failed to update Fix IP list", error)
+                _uiState.update { it.copy(fixIpLoading = false) }
+                toastError(R.string.toast_failure)
+            }
+        }
+    }
+
+    /**
+     * Persists [config] as the exit proxy and chains it onto every server profile
+     * (or clears the chain from every profile when [config] is null). [onApplied] is invoked
+     * on the main thread once the chain update has finished, so the Activity can restart the
+     * running service (if any) only after every profile has actually been rewritten.
+     */
+    fun selectExitProxy(config: FixedIpConfig?, onApplied: () -> Unit = {}) {
+        viewModelScope.launch(ioDispatcher) {
+            _uiState.update { it.copy(fixIpLoading = true) }
+            try {
+                dataSource.setExitProxyConfig(config)
+                dataSource.applyExitProxyToAllServers(config)
+                _uiState.update {
+                    it.copy(exitProxyConfig = config, fixIpLoading = false, showFixIpDialog = false)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                LogUtil.e(AppConfig.TAG, "Failed to apply exit proxy chain", error)
+                _uiState.update { it.copy(fixIpLoading = false) }
+                toastError(R.string.toast_failure)
+                return@launch
+            }
+            withContext(Dispatchers.Main) { onApplied() }
         }
     }
 

@@ -89,6 +89,16 @@ object AppConfig {
     const val PREF_AUTO_REMOVE_INVALID_AFTER_TEST = "pref_auto_remove_invalid_after_test"
     const val PREF_AUTO_SORT_AFTER_TEST = "pref_auto_sort_after_test"
     const val PREF_REAL_PING_CONCURRENCY = "pref_real_ping_concurrency"
+    const val PREF_FIXED_IP_CACHE = "pref_fixed_ip_cache"
+    const val PREF_EXIT_PROXY_LINK = "pref_exit_proxy_link"
+    const val PREF_EXIT_PROXY_REMARK = "pref_exit_proxy_remark"
+
+    /**
+     * Reserved subscription id used to store the imported copy of the currently
+     * selected Fix IP exit-proxy config. It has no matching [com.v2ray.ang.dto.entities.SubscriptionItem],
+     * so it never renders as its own group tab.
+     */
+    const val EXIT_PROXY_POOL_SUBSCRIPTION_ID = "__exit_proxy_pool__"
 
     /** Cache keys. */
     const val CACHE_SUBSCRIPTION_ID = "cache_subscription_id"
@@ -127,6 +137,7 @@ object AppConfig {
     const val GITHUB_RAW_URL = "https://raw.githubusercontent.com"
     const val GITHUB_DOWNLOAD_URL = "$GITHUB_URL/%s/releases/latest/download"
     const val ANDROID_PACKAGE_NAME_LIST_URL = "$GITHUB_RAW_URL/2dust/androidpackagenamelist/master/proxy.txt"
+    const val FIXED_IP_LIST_URL = "$GITHUB_RAW_URL/hmditts/XRD/main/FixedIP.txt"
     const val APP_URL = "$GITHUB_URL/2dust/v2rayNG"
     const val APP_API_URL = "https://api.github.com/repos/2dust/v2rayNG/releases"
     const val APP_ISSUES_URL = "$APP_URL/issues"

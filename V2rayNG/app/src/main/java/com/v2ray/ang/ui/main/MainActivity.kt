@@ -116,6 +116,7 @@ class MainActivity : HelperBaseComponentActivity() {
                     is MainAction.EditServer -> editServer(action.guid, action.profile)
                     is MainAction.ShareClipboard -> shareToClipboard(action.guid)
                     is MainAction.ShareFullContent -> shareFullContentAsync(action.guid)
+                    is MainAction.SelectExitProxy -> selectExitProxy(action.config)
                     else -> mainViewModel.onAction(action)
                 }
             },
@@ -274,6 +275,15 @@ class MainActivity : HelperBaseComponentActivity() {
         if (guid != selected) {
             mainViewModel.updateSelectedGuid(guid)
             LauncherManager.restartService(this)
+        }
+    }
+
+    private fun selectExitProxy(config: FixedIpConfig?) {
+        val previous = mainViewModel.uiState.value.exitProxyConfig
+        mainViewModel.selectExitProxy(config) {
+            if (config != previous && mainViewModel.uiState.value.isRunning) {
+                LauncherManager.restartService(this)
+            }
         }
     }
 

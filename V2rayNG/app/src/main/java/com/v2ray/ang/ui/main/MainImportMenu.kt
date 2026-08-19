@@ -1,6 +1,9 @@
 package com.v2ray.ang.ui.main
 
 import androidx.annotation.StringRes
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.v2ray.ang.R
@@ -19,6 +22,7 @@ private enum class ImportMenuAction(@StringRes val labelRes: Int, val action: Ma
 }
 
 enum class MainMoreMenuAction(@StringRes val labelRes: Int) {
+    FixIp(R.string.title_fix_ip),
     DeleteDuplicate(R.string.title_del_duplicate_config),
     DeleteInvalid(R.string.title_del_invalid_config),
     ExportAll(R.string.title_export_all),
@@ -54,11 +58,18 @@ fun ImportMenuContent(onAction: (MainAction) -> Unit) = AppDropdownMenuItems(
 )
 
 @Composable
-fun MoreMenuContent(onSelected: (MainMoreMenuAction) -> Unit) = AppDropdownMenuItems(
-    items = MainMoreMenuAction.entries,
-    labelRes = { it.labelRes },
-    onSelected = onSelected
-)
+fun MoreMenuContent(onSelected: (MainMoreMenuAction) -> Unit) {
+    DropdownMenuItem(
+        text = { Text(stringResource(MainMoreMenuAction.FixIp.labelRes)) },
+        onClick = { onSelected(MainMoreMenuAction.FixIp) }
+    )
+    HorizontalDivider()
+    AppDropdownMenuItems(
+        items = MainMoreMenuAction.entries.filter { it != MainMoreMenuAction.FixIp },
+        labelRes = { it.labelRes },
+        onSelected = onSelected
+    )
+}
 
 @Composable
 fun ShareMethodDialog(

@@ -184,6 +184,16 @@ fun MainScreen(
     if (shareQRCodeBitmap != null) {
         QRCodeDialog(bitmap = shareQRCodeBitmap, onDismiss = { onAction(MainAction.DismissQRCodeDialog) })
     }
+    if (uiState.showFixIpDialog) {
+        FixIpDialog(
+            configs = uiState.fixedIpConfigs,
+            selected = uiState.exitProxyConfig,
+            loading = uiState.fixIpLoading,
+            onUpdate = { onAction(MainAction.UpdateFixedIpList) },
+            onSelect = { config -> onAction(MainAction.SelectExitProxy(config)) },
+            onDismiss = { onAction(MainAction.DismissFixIpDialog) }
+        )
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -216,8 +226,10 @@ fun MainScreen(
                     onSearchToggle = { show: Boolean -> showSearch = show },
                     onMenuClick = { scope.launch { drawerState.open() } },
                     onAction = onAction,
+                    exitProxyRemark = uiState.exitProxyConfig?.remark,
                     onMoreMenuAction = { action ->
                         when (action) {
+                            MainMoreMenuAction.FixIp -> onAction(MainAction.OpenFixIpDialog)
                             MainMoreMenuAction.DeleteDuplicate -> showDelDuplicateConfirm = true
                             MainMoreMenuAction.DeleteInvalid -> showDelInvalidConfirm = true
                             MainMoreMenuAction.ExportAll -> onAction(MainAction.ExportAll)

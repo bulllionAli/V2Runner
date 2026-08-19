@@ -63,4 +63,22 @@ interface MainDataSource : Closeable {
 
     fun syncSubscriptions()
     fun initAssets()
+
+    /** Currently selected "Fix IP" exit-proxy config, or null when none is selected. */
+    fun getExitProxyConfig(): FixedIpConfig?
+
+    /** Persists the selected exit-proxy config (or clears it when [config] is null). */
+    fun setExitProxyConfig(config: FixedIpConfig?)
+
+    /** Locally cached Fix IP list (from the last successful [fetchFixedIpConfigs] call). */
+    fun getCachedFixedIpConfigs(): List<FixedIpConfig>
+
+    /** Downloads and caches the Fix IP list from [com.v2ray.ang.AppConfig.FIXED_IP_LIST_URL]. */
+    suspend fun fetchFixedIpConfigs(): List<FixedIpConfig>
+
+    /**
+     * Chains [config] onto every eligible server profile (across all subscriptions) as its exit hop,
+     * or clears any previously-applied exit hop from those profiles when [config] is null.
+     */
+    suspend fun applyExitProxyToAllServers(config: FixedIpConfig?)
 }

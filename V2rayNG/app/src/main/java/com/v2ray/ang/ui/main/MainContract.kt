@@ -14,6 +14,16 @@ sealed interface MainStatus {
 }
 
 /**
+ * A single "Fix IP" exit-proxy candidate, parsed from a share-link line
+ * (e.g. `vmess://...#My%20Remark`). [remark] is the URL-decoded fragment,
+ * falling back to the raw [link] when no fragment is present.
+ */
+data class FixedIpConfig(
+    val link: String,
+    val remark: String
+)
+
+/**
  * Main UI state
  */
 data class MainUiState(
@@ -26,7 +36,11 @@ data class MainUiState(
     val locateTarget: LocateTarget? = null,
     val confirmRemove: Boolean = false,
     val doubleColumnDisplay: Boolean = false,
-    val shareQRCodeBitmap: android.graphics.Bitmap? = null
+    val shareQRCodeBitmap: android.graphics.Bitmap? = null,
+    val showFixIpDialog: Boolean = false,
+    val fixIpLoading: Boolean = false,
+    val fixedIpConfigs: List<FixedIpConfig> = emptyList(),
+    val exitProxyConfig: FixedIpConfig? = null
 )
 
 /**
@@ -67,4 +81,9 @@ sealed interface MainAction {
     data class ImportBatchConfig(val configText: String) : MainAction
 
     data class LocateHandled(val target: LocateTarget) : MainAction
+
+    data object OpenFixIpDialog : MainAction
+    data object DismissFixIpDialog : MainAction
+    data object UpdateFixedIpList : MainAction
+    data class SelectExitProxy(val config: FixedIpConfig?) : MainAction
 }
