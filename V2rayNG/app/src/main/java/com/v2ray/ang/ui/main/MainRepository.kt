@@ -274,25 +274,27 @@ class MainRepository(
             return@withContext
         }
 
-        // CoreConfigContextBuilder resolves each subscription's chain as [nextProfile, <server>, prevProfile],
-        // and the LAST resolved profile becomes the final hop with no dialerProxy — i.e. the real exit node.
-        // So setting prevProfile on every subscription makes every one of its servers exit through this config.
+        // CoreConfigContextBuilder resolves each subscription's chain as [prevProfile ("Entry proxy"),
+        // <server>, nextProfile ("Exit proxy")], and the LAST resolved profile becomes the final hop
+        // with no dialerProxy — i.e. the real exit node. That last hop is nextProfile, not prevProfile
+        // (see sub_setting_pre_profile/"Entry proxy" vs sub_setting_next_profile/"Exit proxy" in strings.xml).
+        // So setting nextProfile on every subscription makes every one of its servers exit through this config.
         MmkvManager.decodeSubscriptions().forEach { cache ->
             if (cache.guid.isEmpty()) return@forEach // skip the synthetic "All" filter entry
             val subItem = cache.subscription
-            if (subItem.prevProfile == exitRemark) return@forEach
-            subItem.prevProfile = exitRemark
+            if (subItem.nextProfile == exitRemark) return@forEach
+            subItem.nextProfile = exitRemark
             MmkvManager.encodeSubscription(cache.guid, subItem)
         }
     }
 
-    /** Clears the exit-proxy hop (prevProfile) from every subscription. */
+    /** Clears the exit-proxy hop (nextProfile) from every subscription. */
     private fun clearExitProxyFromAllSubscriptions() {
         MmkvManager.decodeSubscriptions().forEach { cache ->
             if (cache.guid.isEmpty()) return@forEach
             val subItem = cache.subscription
-            if (subItem.prevProfile.isNullOrEmpty()) return@forEach
-            subItem.prevProfile = null
+            if (subItem.nextProfile.isNullOrEmpty()) return@forEach
+            subItem.nextProfile = null
             MmkvManager.encodeSubscription(cache.guid, subItem)
         }
     }
