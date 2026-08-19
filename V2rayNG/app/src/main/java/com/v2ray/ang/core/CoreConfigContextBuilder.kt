@@ -200,6 +200,17 @@ object CoreConfigContextBuilder {
     /**
      * Resolve chain nodes from subscription neighbors in order: next, current, prev.
      *
+     * This order is deliberate, not arbitrary: CoreConfigManager.handleProxyChainResolvedOutbound
+     * turns this list into a dialerProxy chain where element 0 keeps the routing-facing tag and each
+     * element's dialerProxy points to the next one. That means:
+     *   - The FIRST element (nextProfile) is the one whose own server actually opens the connection
+     *     to the destination — dialerProxy only changes how that element's TCP connection gets dialed,
+     *     not who the destination sees. So nextProfile ("Exit proxy" in the UI) ends up as the real,
+     *     destination-visible exit.
+     *   - The LAST element (prevProfile, or <config> itself if prevProfile is unset) is the one with
+     *     no dialerProxy, i.e. the first raw-network hop closest to the device — the chain's entry
+     *     point, matching prevProfile's "Entry proxy" label in the UI.
+     *
      * When no chain is available, return a single-node result.
      */
     private fun resolveProxyChainProfilesFromGroup(config: ProfileItem): List<ProfileItem> {

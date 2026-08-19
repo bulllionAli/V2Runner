@@ -344,6 +344,13 @@ object CoreConfigManager {
         chainOutbounds.forEachIndexed { index, outbound ->
             outbound.tag = chainTags[index]
         }
+        // dialerProxy only changes how outbound i's own TCP connection (to its own configured server)
+        // gets dialed — it does NOT change which server ends up talking to the destination. outbound 0
+        // keeps the routing-facing tag and still speaks its protocol directly to its own server, so
+        // that server is the one the destination actually sees; it's just that reaching it is tunneled
+        // through outbound 1, which is tunneled through outbound 2, and so on. The last outbound (with
+        // no dialerProxy set) is the one whose connection is made over the raw network — i.e. the chain's
+        // entry point, closest to the device, not the exit.
         for (i in 0 until chainOutbounds.size - 1) {
             chainOutbounds[i].ensureSockopt().dialerProxy = chainOutbounds[i + 1].tag
         }

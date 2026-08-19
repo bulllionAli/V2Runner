@@ -274,11 +274,21 @@ class MainRepository(
             throw IllegalStateException("Failed to resolve imported Fix IP profile remark for ${config.link}")
         }
 
-        // CoreConfigContextBuilder resolves each subscription's chain as [prevProfile ("Entry proxy"),
-        // <server>, nextProfile ("Exit proxy")], and the LAST resolved profile becomes the final hop
-        // with no dialerProxy — i.e. the real exit node. That last hop is nextProfile, not prevProfile
-        // (see sub_setting_pre_profile/"Entry proxy" vs sub_setting_next_profile/"Exit proxy" in strings.xml).
-        // So setting nextProfile on every subscription makes every one of its servers exit through this config.
+        // CoreConfigContextBuilder.resolveProxyChainProfilesFromGroup resolves each subscription's
+        // chain as [nextProfile, <server>, prevProfile]. dialerProxy is only about how each hop's own
+        // TCP connection gets dialed, not about which hop's server the destination actually sees:
+        //   - The FIRST resolved profile (nextProfile) keeps the routing-facing tag (e.g. "proxy") and
+        //     talks its protocol straight to its own configured server — that server is the one that
+        //     opens the real connection to the destination site, so nextProfile's server IP is what the
+        //     destination sees. This is why nextProfile is labeled "Exit proxy" in the UI.
+        //   - The LAST resolved profile (prevProfile, or <server> if prevProfile is unset) is the one
+        //     with no dialerProxy, meaning it's the hop closest to the device — the first raw-network
+        //     connection made, i.e. the tunnel's entry point. This is why prevProfile is labeled
+        //     "Entry proxy" in the UI.
+        // So setting nextProfile on every subscription makes every one of its servers exit through this
+        // config: device -> subscription's own server (entry, no dialerProxy) -> Fix IP server
+        // (nextProfile, the tag routing picks) -> destination, with the destination seeing the Fix IP
+        // server's address.
         MmkvManager.decodeSubscriptions().forEach { cache ->
             if (cache.guid.isEmpty()) return@forEach // skip the synthetic "All" filter entry
             val subItem = cache.subscription
