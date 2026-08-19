@@ -97,7 +97,10 @@ class SubEditActivity : BaseComponentActivity() {
             }
         }
 
-        if (subItem.autoUpdate && subItem.updateInterval < AppConfig.SUBSCRIPTION_MIN_INTERVAL_MINUTES) {
+        if (subItem.autoUpdate &&
+            (subItem.updateInterval < AppConfig.SUBSCRIPTION_MIN_INTERVAL_MINUTES ||
+                subItem.updateInterval > AppConfig.SUBSCRIPTION_MAX_INTERVAL_MINUTES)
+        ) {
             toast(R.string.toast_invalid_update_interval)
             return false
         }

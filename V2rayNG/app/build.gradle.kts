@@ -14,7 +14,7 @@ android {
         minSdk = 24
         targetSdk = 37
         versionCode = 744
-        versionName = "2.3.4"
+        versionName = "2.3.4-a"
 
         val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {
