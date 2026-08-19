@@ -24,7 +24,7 @@
     <string name="toast_services_failure">Failed to start service</string>
 
     <!--ServerActivity-->
-    <string name="title_server">V2Runner</string>
+    <string name="title_server">v2Runner</string>
     <string name="menu_item_add_config">Add config</string>
     <string name="menu_item_save_config">Save config</string>
     <string name="menu_item_edit_config">Edit config</string>
