@@ -138,8 +138,13 @@ fun SubEditScreen(
     val requestHeaders = initial.requestHeaders.orEmpty()
     val filter = initial.filter ?: ""
     val enabled = initial.enabled
-    var autoUpdate by rememberSaveable { mutableStateOf(true) }
-    var updateInterval by rememberSaveable { mutableStateOf(initial.updateInterval.toString()) }
+    // Automatic update is mandatory and cannot be turned off by the user (see locked switch below).
+    val autoUpdate = true
+    var updateInterval by rememberSaveable {
+        mutableStateOf(
+            if (initial.updateInterval > 0) initial.updateInterval.toString() else "1440"
+        )
+    }
     var allowInsecureUrl by rememberSaveable { mutableStateOf(initial.allowInsecureUrl) }
     var prevProfile by rememberSaveable { mutableStateOf(initial.prevProfile ?: "") }
     var nextProfile by rememberSaveable { mutableStateOf(initial.nextProfile ?: "") }
@@ -199,10 +204,13 @@ fun SubEditScreen(
             FormTextField(stringResource(R.string.sub_setting_remarks), remarks, { remarks = it })
             FormTextField(stringResource(R.string.sub_setting_url), url, { url = it })
 
+            // Locked on: automatic update is mandatory, so the switch is shown as always-on
+            // and disabled so the user cannot interact with or disable it.
             SettingsSwitchItem(
                 title = stringResource(R.string.sub_auto_update),
                 checked = autoUpdate,
-                onCheckedChange = { autoUpdate = it }
+                enabled = false,
+                onCheckedChange = {}
             )
 
             FormTextField(

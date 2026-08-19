@@ -611,7 +611,14 @@ object AngConfigManager {
         val subItem = SubscriptionItem()
         subItem.remarks = uri.fragment ?: "import sub"
         subItem.url = url
-        MmkvManager.encodeSubscription("", subItem)
+        // Automatic update must always be on, updating daily by default. This cannot be
+        // disabled by the user (see SubEditActivity, where the toggle is forced/locked).
+        subItem.autoUpdate = true
+        subItem.updateInterval = 1440
+        val subId = Utils.getUuid()
+        MmkvManager.encodeSubscription(subId, subItem)
+        // Actually schedule the periodic auto-update worker, not just persist the flag.
+        SubscriptionUpdater.syncOne(subId = subId)
         return 1
     }
 
