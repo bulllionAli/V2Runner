@@ -15,8 +15,6 @@ import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.ServerAffiliationInfo
 import com.v2ray.ang.dto.entities.SubscriptionCache
 import com.v2ray.ang.dto.entities.SubscriptionItem
-import com.v2ray.ang.enums.EConfigType
-import com.v2ray.ang.extension.isComplexType
 import com.v2ray.ang.extension.serializable
 import com.v2ray.ang.handler.AngConfigManager
 import com.v2ray.ang.handler.AppLocaleManager
@@ -266,7 +264,7 @@ class MainRepository(
 
     override suspend fun applyExitProxyToAllServers(config: FixedIpConfig?): Unit = withContext(Dispatchers.IO) {
         if (config == null) {
-            clearExitProxyFromAllServers()
+            clearExitProxyFromAllSubscriptions()
             return@withContext
         }
 
@@ -276,39 +274,28 @@ class MainRepository(
             return@withContext
         }
 
-        eligibleChainMemberGuids().forEach { guid ->
-            val profile = MmkvManager.decodeServerConfig(guid) ?: return@forEach
-            if (profile.remarks == exitRemark) return@forEach // never chain the exit node onto itself
-            if (profile.proxyChainProfiles == exitRemark) return@forEach
-            profile.proxyChainProfiles = exitRemark
-            MmkvManager.encodeServerConfig(guid, profile)
+        // CoreConfigContextBuilder resolves each subscription's chain as [nextProfile, <server>, prevProfile],
+        // and the LAST resolved profile becomes the final hop with no dialerProxy — i.e. the real exit node.
+        // So setting prevProfile on every subscription makes every one of its servers exit through this config.
+        MmkvManager.decodeSubscriptions().forEach { cache ->
+            if (cache.guid.isEmpty()) return@forEach // skip the synthetic "All" filter entry
+            val subItem = cache.subscription
+            if (subItem.prevProfile == exitRemark) return@forEach
+            subItem.prevProfile = exitRemark
+            MmkvManager.encodeSubscription(cache.guid, subItem)
         }
     }
 
-    /** Removes any previously-applied exit-proxy hop from every server profile. */
-    private fun clearExitProxyFromAllServers() {
-        val previousRemark = getExitProxyConfig()?.remark
-        eligibleChainMemberGuids().forEach { guid ->
-            val profile = MmkvManager.decodeServerConfig(guid) ?: return@forEach
-            val chain = profile.proxyChainProfiles
-            if (chain.isNullOrEmpty()) return@forEach
-            if (previousRemark.isNullOrEmpty() || chain == previousRemark) {
-                profile.proxyChainProfiles = null
-                MmkvManager.encodeServerConfig(guid, profile)
-            }
+    /** Clears the exit-proxy hop (prevProfile) from every subscription. */
+    private fun clearExitProxyFromAllSubscriptions() {
+        MmkvManager.decodeSubscriptions().forEach { cache ->
+            if (cache.guid.isEmpty()) return@forEach
+            val subItem = cache.subscription
+            if (subItem.prevProfile.isNullOrEmpty()) return@forEach
+            subItem.prevProfile = null
+            MmkvManager.encodeSubscription(cache.guid, subItem)
         }
     }
-
-    /** Regular, single-hop server profiles that can act as (or receive) a proxy-chain hop. */
-    private fun eligibleChainMemberGuids(): List<String> =
-        MmkvManager.decodeAllServerList().filter { guid ->
-            val profile = MmkvManager.decodeServerConfig(guid)
-            profile != null &&
-                profile.configType != EConfigType.CUSTOM &&
-                profile.configType != EConfigType.POLICYGROUP &&
-                profile.configType != EConfigType.PROXYCHAIN &&
-                !profile.configType.isComplexType()
-        }
 
     /**
      * Ensures [config]'s link exists as an actual, decodable server profile (so it can be
