@@ -211,21 +211,44 @@ object SettingsManager {
             return null
         }
         val serverList = decodeAllServerList()
-        return serverList
+        serverList
+            .mapNotNull { guid -> decodeServerConfig(guid) }
+            .firstOrNull { it.remarks == remarks }
+            ?.let { return it }
+
+        // Fallback: check the reserved Exit Proxy pool bucket. It is intentionally
+        // excluded from subsList/decodeAllServerList so it never shows up as a tab
+        // or in the "All" list, but imported Fix IP profiles still need to be
+        // resolvable here — otherwise nextProfile/prevProfile chaining silently
+        // fails even though the remark name is correctly saved on the profile.
+        return MmkvManager.decodeServerList(AppConfig.EXIT_PROXY_POOL_SUBSCRIPTION_ID)
             .mapNotNull { guid -> decodeServerConfig(guid) }
             .firstOrNull { it.remarks == remarks }
     }
 
     /**
      * Collects non-empty profile remarks while excluding specific config types.
+     *
+     * Also includes remarks from the reserved Exit Proxy pool bucket (imported
+     * Fix IP profiles) as a fallback, without exposing that bucket as its own
+     * subscription tab — it is never added to subsList.
      */
     fun getProfileRemarks(excludeConfigTypes: Set<EConfigType> = setOf(EConfigType.CUSTOM)): List<String> {
-        return decodeAllServerList()
+        val mainRemarks = decodeAllServerList()
             .asSequence()
             .mapNotNull { guid -> decodeServerConfig(guid) }
             .filter { profile -> profile.configType !in excludeConfigTypes }
             .map { it.remarks.trim() }
             .filter { it.isNotEmpty() }
+
+        val exitProxyPoolRemarks = MmkvManager.decodeServerList(AppConfig.EXIT_PROXY_POOL_SUBSCRIPTION_ID)
+            .asSequence()
+            .mapNotNull { guid -> decodeServerConfig(guid) }
+            .filter { profile -> profile.configType !in excludeConfigTypes }
+            .map { it.remarks.trim() }
+            .filter { it.isNotEmpty() }
+
+        return (mainRemarks + exitProxyPoolRemarks)
             .distinct()
             .toList()
     }
