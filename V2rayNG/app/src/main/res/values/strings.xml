@@ -318,7 +318,7 @@
     <string name="logcat_share">Share log</string>
     <string name="title_service_restart">Restart service</string>
     <string name="title_del_all_config">Delete configs</string>
-    <string name="title_fix_ip">Fix IP?</string>
+    <string name="title_fix_ip">Fixed IP?</string>
     <string name="title_fix_ip_none">None</string>
     <string name="title_fix_ip_update">Update</string>
     <string name="title_fix_ip_empty">No configs available. Tap Update to fetch the list.</string>

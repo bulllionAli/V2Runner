@@ -82,7 +82,7 @@ fun SettingsScreen(
     var advancedSettingsExpanded by rememberSaveable { mutableStateOf(true) }
     var modeSettingsExpanded by rememberSaveable { mutableStateOf(true) }
 
-    var localDns by rememberMmkvBool(AppConfig.PREF_LOCAL_DNS_ENABLED, false)
+    var localDns by rememberMmkvBool(AppConfig.PREF_LOCAL_DNS_ENABLED, true)
     var fakeDns by rememberMmkvBool(AppConfig.PREF_FAKE_DNS_ENABLED, false)
     var appendHttpProxy by rememberMmkvBool(AppConfig.PREF_APPEND_HTTP_PROXY, false)
     var vpnDns by rememberMmkvString(AppConfig.PREF_VPN_DNS, "")
@@ -209,18 +209,20 @@ fun SettingsScreen(
                 onExpandedChange = { uiSettingsExpanded = it }
             )
             if (uiSettingsExpanded) {
-                SettingsSwitchItem(
-                    title = stringResource(R.string.title_pref_speed_enabled),
-                    summary = stringResource(R.string.summary_pref_speed_enabled),
-                    checked = speedEnabled,
-                    onCheckedChange = { speedEnabled = it }
-                )
-                SettingsSwitchItem(
-                    title = stringResource(R.string.title_pref_confirm_remove),
-                    summary = stringResource(R.string.summary_pref_confirm_remove),
-                    checked = confirmRemove,
-                    onCheckedChange = { confirmRemove = it }
-                )
+                // Hidden from Settings UI per request; preference/logic kept intact.
+                // SettingsSwitchItem(
+                //     title = stringResource(R.string.title_pref_speed_enabled),
+                //     summary = stringResource(R.string.summary_pref_speed_enabled),
+                //     checked = speedEnabled,
+                //     onCheckedChange = { speedEnabled = it }
+                // )
+                // Hidden from Settings UI per request; preference/logic kept intact.
+                // SettingsSwitchItem(
+                //     title = stringResource(R.string.title_pref_confirm_remove),
+                //     summary = stringResource(R.string.summary_pref_confirm_remove),
+                //     checked = confirmRemove,
+                //     onCheckedChange = { confirmRemove = it }
+                // )
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_double_column_display),
                     summary = stringResource(R.string.summary_pref_double_column_display),
@@ -643,38 +645,41 @@ fun SettingsScreen(
                     selectedValue = mode,
                     onSelected = { mode = it }
                 )
-                SettingsMenuItem(
-                    title = stringResource(R.string.title_mode_help),
-                    onClick = onModeHelpClicked
-                )
-                SettingsSwitchItem(
-                    title = stringResource(R.string.title_root_mode_enabled),
-                    summary = stringResource(R.string.summary_root_mode_enabled),
-                    checked = enableRootMode,
-                    onCheckedChange = { newValue ->
-                        if (newValue && !RootManager.cachedRoot()) {
-                            viewModel.checkAndRequestRoot {
-                                enableRootMode = true
-                            }
-                        } else {
-                            enableRootMode = newValue
-                        }
-                    }
-                )
-                SettingsSwitchItem(
-                    title = stringResource(R.string.title_root_lan_sharing),
-                    summary = stringResource(R.string.summary_root_lan_sharing),
-                    checked = lanSharing,
-                    onCheckedChange = { newValue ->
-                        if (newValue && !RootManager.cachedRoot()) {
-                            viewModel.checkAndRequestRoot {
-                                lanSharing = true
-                            }
-                        } else {
-                            lanSharing = newValue
-                        }
-                    }
-                )
+                // Hidden from Settings UI per request; logic kept intact.
+                // SettingsMenuItem(
+                //     title = stringResource(R.string.title_mode_help),
+                //     onClick = onModeHelpClicked
+                // )
+                // Hidden from Settings UI per request; logic kept intact.
+                // SettingsSwitchItem(
+                //     title = stringResource(R.string.title_root_mode_enabled),
+                //     summary = stringResource(R.string.summary_root_mode_enabled),
+                //     checked = enableRootMode,
+                //     onCheckedChange = { newValue ->
+                //         if (newValue && !RootManager.cachedRoot()) {
+                //             viewModel.checkAndRequestRoot {
+                //                 enableRootMode = true
+                //             }
+                //         } else {
+                //             enableRootMode = newValue
+                //         }
+                //     }
+                // )
+                // Hidden from Settings UI per request; logic kept intact.
+                // SettingsSwitchItem(
+                //     title = stringResource(R.string.title_root_lan_sharing),
+                //     summary = stringResource(R.string.summary_root_lan_sharing),
+                //     checked = lanSharing,
+                //     onCheckedChange = { newValue ->
+                //         if (newValue && !RootManager.cachedRoot()) {
+                //             viewModel.checkAndRequestRoot {
+                //                 lanSharing = true
+                //             }
+                //         } else {
+                //             lanSharing = newValue
+                //         }
+                //     }
+                // )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
