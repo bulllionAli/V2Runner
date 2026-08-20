@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DrawerState
@@ -28,7 +29,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.v2ray.ang.BuildConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.ui.compose.AppDivider
 import com.v2ray.ang.ui.compose.LocalDarkTheme
@@ -68,45 +71,59 @@ fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) ->
         modifier = Modifier.fillMaxWidth(0.75f),
         drawerContainerColor = MaterialTheme.colorScheme.surface
     ) {
-        Column(
-            modifier = Modifier
-                .verticalScroll(drawerScrollState)
-                .verticalScrollbar(drawerScrollState)
-        ) {
-            Surface(
+        Column(modifier = Modifier.fillMaxSize()) {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp)
+                    .weight(1f)
+                    .verticalScroll(drawerScrollState)
+                    .verticalScrollbar(drawerScrollState)
             ) {
-                Column(
+                Surface(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                        .fillMaxWidth()
+                        .height(180.dp)
                 ) {
-                    Image(
-                        painter = painterResource(R.mipmap.ic_launcher_foreground),
-                        contentDescription = null,
-                        modifier = Modifier.size(120.dp)
-                    )
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Image(
+                            painter = painterResource(R.mipmap.ic_launcher_foreground),
+                            contentDescription = null,
+                            modifier = Modifier.size(120.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.app_name),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+                drawerItems.forEachIndexed { index, item ->
+                    if (index == primaryDrawerItems.size) AppDivider()
+                    NavigationDrawerItem(
+                        label = { Text(stringResource(item.labelRes)) },
+                        selected = false,
+                        onClick = { onNavigate(item) },
+                        icon = { Icon(painterResource(item.iconRes), contentDescription = null) },
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                     )
                 }
             }
-            drawerItems.forEachIndexed { index, item ->
-                if (index == primaryDrawerItems.size) AppDivider()
-                NavigationDrawerItem(
-                    label = { Text(stringResource(item.labelRes)) },
-                    selected = false,
-                    onClick = { onNavigate(item) },
-                    icon = { Icon(painterResource(item.iconRes), contentDescription = null) },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
-            }
+
+            AppDivider()
+            Text(
+                text = "v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            )
         }
     }
 }

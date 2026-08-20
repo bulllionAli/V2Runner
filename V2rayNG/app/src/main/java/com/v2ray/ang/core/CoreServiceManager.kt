@@ -27,6 +27,7 @@ import com.v2ray.ang.helper.MessageHelper
 import com.v2ray.ang.service.DialerNativeService
 import com.v2ray.ang.service.DialerWebviewService
 import com.v2ray.ang.service.NetworkMonitor
+import com.v2ray.ang.ui.main.FixedIpConfig
 import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.Utils
 import kotlinx.coroutines.CoroutineScope
@@ -143,7 +144,7 @@ object CoreServiceManager {
             tunFd = 0
         }
 
-        NotificationManager.showNotification(currentConfig)
+        NotificationManager.showNotification(currentConfig, getExitProxyConfig())
         if (dialerAddr.isNotNullEmpty()) {
             CoreNativeManager.reconcileBrowserDialer(dialerAddr)
         }
@@ -176,6 +177,17 @@ object CoreServiceManager {
         }
         NotificationManager.startSpeedNotification()
         LogUtil.i(AppConfig.TAG, "StartCore-Manager: Core started successfully")
+    }
+
+    /**
+     * Reads the currently configured Exit Proxy from settings.
+     * @return The FixedIpConfig if an Exit Proxy is set, null if disabled/"None".
+     */
+    private fun getExitProxyConfig(): FixedIpConfig? {
+        val link = MmkvManager.decodeSettingsString(AppConfig.PREF_EXIT_PROXY_LINK).orEmpty()
+        if (link.isEmpty()) return null
+        val remark = MmkvManager.decodeSettingsString(AppConfig.PREF_EXIT_PROXY_REMARK).orEmpty()
+        return FixedIpConfig(link = link, remark = remark.ifEmpty { link })
     }
 
     /**

@@ -16,6 +16,7 @@ import com.v2ray.ang.R
 import com.v2ray.ang.core.CoreServiceManager
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.extension.toSpeedString
+import com.v2ray.ang.ui.main.FixedIpConfig
 import com.v2ray.ang.ui.main.MainActivity
 import com.v2ray.ang.util.LogUtil
 import kotlinx.coroutines.CoroutineScope
@@ -60,8 +61,10 @@ object NotificationManager {
     /**
      * Shows the notification.
      * @param currentConfig The current profile configuration.
+     * @param exitProxyConfig The active Exit Proxy config, if any. When present and not
+     * the "None" option, its remark is appended after the current config's remark.
      */
-    fun showNotification(currentConfig: ProfileItem?) {
+    fun showNotification(currentConfig: ProfileItem?, exitProxyConfig: FixedIpConfig? = null) {
         val service = getService() ?: return
 
         // Reset last query time to avoid querying stats too soon after showing the notification
@@ -91,9 +94,16 @@ object NotificationManager {
                 ""
             }
 
+        val baseTitle = currentConfig?.remarks ?: service.getString(R.string.app_name)
+        val title = if (exitProxyConfig != null) {
+            "$baseTitle  ----->  ${exitProxyConfig.remark}"
+        } else {
+            baseTitle
+        }
+
         mBuilder = NotificationCompat.Builder(service, channelId)
             .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle(currentConfig?.remarks ?: service.getString(R.string.app_name))
+            .setContentTitle(title)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setShowWhen(false)
