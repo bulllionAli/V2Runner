@@ -244,18 +244,6 @@ fun SettingsScreen(
                     }
                 )
                 SettingsSwitchItem(
-                    title = stringResource(R.string.title_pref_show_fixed_ips),
-                    summary = stringResource(R.string.summary_pref_show_fixed_ips),
-                    checked = showFixedIps,
-                    onCheckedChange = {
-                        showFixedIps = it
-                        // Whenever this feature's visibility is toggled (either direction),
-                        // the currently selected Fix IP config must reset to "None".
-                        SettingsManager.clearFixedIpExitProxySelection()
-                        SettingsChangeManager.makeSetupGroupTab()
-                    }
-                )
-                SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_dynamic_color),
                     summary = stringResource(R.string.summary_pref_dynamic_color),
                     checked = dynamicColor,
@@ -293,6 +281,18 @@ fun SettingsScreen(
                 onExpandedChange = { vpnSettingsExpanded = it }
             )
             if (vpnSettingsExpanded) {
+                SettingsSwitchItem(
+                    title = stringResource(R.string.title_pref_show_fixed_ips),
+                    summary = stringResource(R.string.summary_pref_show_fixed_ips),
+                    checked = showFixedIps,
+                    onCheckedChange = {
+                        showFixedIps = it
+                        // Whenever this feature's visibility is toggled (either direction),
+                        // the currently selected Fix IP config must reset to "None".
+                        SettingsManager.clearFixedIpExitProxySelection()
+                        SettingsChangeManager.makeSetupGroupTab()
+                    }
+                )
                 SettingsSwitchItem(
                     title = stringResource(R.string.title_pref_ipv6_enabled),
                     summary = stringResource(R.string.summary_pref_ipv6_enabled),
