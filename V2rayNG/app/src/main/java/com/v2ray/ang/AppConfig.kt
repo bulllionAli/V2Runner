@@ -94,6 +94,9 @@ object AppConfig {
     const val PREF_EXIT_PROXY_LINK = "pref_exit_proxy_link"
     const val PREF_EXIT_PROXY_REMARK = "pref_exit_proxy_remark"
 
+    /** Whether the Fixed IP feature (menu entry, exit-proxy indicator, sub Exit proxy field) is shown. */
+    const val PREF_SHOW_FIXED_IPS = "pref_show_fixed_ips"
+
     /**
      * Reserved subscription id used to store the imported copy of the currently
      * selected Fix IP exit-proxy config. It has no matching [com.v2ray.ang.dto.entities.SubscriptionItem],

@@ -274,6 +274,9 @@
     <string name="title_pref_group_all_display">Show an "All" group tab</string>
     <string name="summary_pref_group_all_display">Combine profiles from every subscription group in one tab.</string>
 
+    <string name="title_pref_show_fixed_ips">Show Fixed IPs</string>
+    <string name="summary_pref_show_fixed_ips">Display Fixed IP Configs</string>
+
     <!-- AboutActivity -->
     <string name="title_pref_feedback">Feedback</string>
     <string name="summary_pref_feedback">Suggest improvements or report bugs on GitHub</string>

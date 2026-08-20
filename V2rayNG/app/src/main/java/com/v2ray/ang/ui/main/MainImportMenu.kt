@@ -6,10 +6,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
+import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isComplexType
+import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.ui.compose.AppDropdownMenuItems
 import com.v2ray.ang.ui.compose.SelectListDialog
 
@@ -59,11 +61,14 @@ fun ImportMenuContent(onAction: (MainAction) -> Unit) = AppDropdownMenuItems(
 
 @Composable
 fun MoreMenuContent(onSelected: (MainMoreMenuAction) -> Unit) {
-    DropdownMenuItem(
-        text = { Text(stringResource(MainMoreMenuAction.FixIp.labelRes)) },
-        onClick = { onSelected(MainMoreMenuAction.FixIp) }
-    )
-    HorizontalDivider()
+    val showFixedIps = MmkvManager.decodeSettingsBool(AppConfig.PREF_SHOW_FIXED_IPS, false)
+    if (showFixedIps) {
+        DropdownMenuItem(
+            text = { Text(stringResource(MainMoreMenuAction.FixIp.labelRes)) },
+            onClick = { onSelected(MainMoreMenuAction.FixIp) }
+        )
+        HorizontalDivider()
+    }
     AppDropdownMenuItems(
         items = MainMoreMenuAction.entries.filter { it != MainMoreMenuAction.FixIp },
         labelRes = { it.labelRes },

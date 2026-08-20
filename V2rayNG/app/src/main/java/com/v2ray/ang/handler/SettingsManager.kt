@@ -254,6 +254,24 @@ object SettingsManager {
     }
 
     /**
+     * Resets the Fix IP exit-proxy selection to "None": clears the stored exit-proxy
+     * config and strips the exit-proxy hop (nextProfile) from every subscription's
+     * proxy chain. Called whenever the "Show Fixed IPs" setting is toggled on or off,
+     * so a stale selection never lingers once the feature (or its UI) is hidden/shown.
+     */
+    fun clearFixedIpExitProxySelection() {
+        MmkvManager.encodeSettings(AppConfig.PREF_EXIT_PROXY_LINK, "")
+        MmkvManager.encodeSettings(AppConfig.PREF_EXIT_PROXY_REMARK, "")
+        MmkvManager.decodeSubscriptions().forEach { cache ->
+            if (cache.guid.isEmpty()) return@forEach // skip the synthetic "All" filter entry
+            val subItem = cache.subscription
+            if (subItem.nextProfile.isNullOrEmpty()) return@forEach
+            subItem.nextProfile = null
+            encodeSubscription(cache.guid, subItem)
+        }
+    }
+
+    /**
      * Removes the subscription.
      * If there are no remaining subscriptions,
      * it creates a new default subscription to ensure that ungroup

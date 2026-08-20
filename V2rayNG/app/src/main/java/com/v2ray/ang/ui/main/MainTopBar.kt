@@ -27,7 +27,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
+import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.ui.compose.AppTopBar
 import com.v2ray.ang.ui.compose.verticalScrollbar
 
@@ -46,6 +48,7 @@ fun MainTopBar(
 ) {
     var showImportMenu by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    val showFixedIps = MmkvManager.decodeSettingsBool(AppConfig.PREF_SHOW_FIXED_IPS, false)
     val importMenuScrollState = rememberScrollState()
     val moreMenuScrollState = rememberScrollState()
     val statusBarHeight = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -73,7 +76,7 @@ fun MainTopBar(
             }
         },
         actions = {
-            if (!showSearch && !exitProxyRemark.isNullOrEmpty()) {
+            if (showFixedIps && !showSearch && !exitProxyRemark.isNullOrEmpty()) {
                 Text(
                     text = exitProxyRemark,
                     style = MaterialTheme.typography.labelSmall,

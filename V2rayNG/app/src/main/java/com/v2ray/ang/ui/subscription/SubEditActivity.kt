@@ -154,6 +154,7 @@ fun SubEditScreen(
 
     var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
     val confirmRemove = MmkvManager.decodeSettingsBool(AppConfig.PREF_CONFIRM_REMOVE, false)
+    val showFixedIps = MmkvManager.decodeSettingsBool(AppConfig.PREF_SHOW_FIXED_IPS, false)
     val scrollState = rememberScrollState()
 
     fun buildSubItem(): SubscriptionItem {
@@ -235,15 +236,17 @@ fun SubEditScreen(
                 editable = true,
                 supportingText = stringResource(R.string.sub_setting_entry_proxy_tip)
             )
-            FormDropdownField(
-                label = stringResource(R.string.sub_setting_next_profile),
-                placeholder = stringResource(R.string.sub_setting_exit_proxy_tip),
-                value = nextProfile,
-                options = profileSuggestions,
-                onValueChange = { nextProfile = it },
-                editable = true,
-                supportingText = stringResource(R.string.sub_setting_exit_proxy_tip)
-            )
+            if (showFixedIps) {
+                FormDropdownField(
+                    label = stringResource(R.string.sub_setting_next_profile),
+                    placeholder = stringResource(R.string.sub_setting_exit_proxy_tip),
+                    value = nextProfile,
+                    options = profileSuggestions,
+                    onValueChange = { nextProfile = it },
+                    editable = true,
+                    supportingText = stringResource(R.string.sub_setting_exit_proxy_tip)
+                )
+            }
             NavigationBarsSpacer()
         }
     }

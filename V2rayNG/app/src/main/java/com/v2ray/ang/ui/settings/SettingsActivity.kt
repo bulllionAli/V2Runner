@@ -33,6 +33,7 @@ import com.v2ray.ang.handler.MmkvManager
 import com.v2ray.ang.handler.MmkvManager.rememberMmkvBool
 import com.v2ray.ang.handler.MmkvManager.rememberMmkvString
 import com.v2ray.ang.handler.SettingsChangeManager
+import com.v2ray.ang.handler.SettingsManager
 import com.v2ray.ang.root.RootManager
 import com.v2ray.ang.ui.base.BaseComponentActivity
 import com.v2ray.ang.ui.compose.AppTopBar
@@ -126,6 +127,7 @@ fun SettingsScreen(
     var confirmRemove by rememberMmkvBool(AppConfig.PREF_CONFIRM_REMOVE, false)
     var doubleColumnDisplay by rememberMmkvBool(AppConfig.PREF_DOUBLE_COLUMN_DISPLAY, true)
     var groupAllDisplay by rememberMmkvBool(AppConfig.PREF_GROUP_ALL_DISPLAY, false)
+    var showFixedIps by rememberMmkvBool(AppConfig.PREF_SHOW_FIXED_IPS, false)
     var language by remember {
         mutableStateOf(
             MmkvManager.decodeSettingsString(AppConfig.PREF_LANGUAGE, "auto") ?: "auto"
@@ -238,6 +240,18 @@ fun SettingsScreen(
                     checked = groupAllDisplay,
                     onCheckedChange = {
                         groupAllDisplay = it
+                        SettingsChangeManager.makeSetupGroupTab()
+                    }
+                )
+                SettingsSwitchItem(
+                    title = stringResource(R.string.title_pref_show_fixed_ips),
+                    summary = stringResource(R.string.summary_pref_show_fixed_ips),
+                    checked = showFixedIps,
+                    onCheckedChange = {
+                        showFixedIps = it
+                        // Whenever this feature's visibility is toggled (either direction),
+                        // the currently selected Fix IP config must reset to "None".
+                        SettingsManager.clearFixedIpExitProxySelection()
                         SettingsChangeManager.makeSetupGroupTab()
                     }
                 )

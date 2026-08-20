@@ -278,6 +278,9 @@
     <string name="title_pref_group_all_display">نمایش زبانهٔ «همه»</string>
     <string name="summary_pref_group_all_display">نمایش پروفایل‌های همهٔ گروه‌های اشتراک در یک زبانه.</string>
 
+    <string name="title_pref_show_fixed_ips">نمایش آیپی ثابت</string>
+    <string name="summary_pref_show_fixed_ips">نمایش کانفیگ‌های آیپی ثابت</string>
+
     <!-- AboutActivity -->
     <string name="title_pref_feedback">بازخورد</string>
     <string name="summary_pref_feedback">بازخورد یا گزارش اشکالات در گیت‌ هاب</string>
