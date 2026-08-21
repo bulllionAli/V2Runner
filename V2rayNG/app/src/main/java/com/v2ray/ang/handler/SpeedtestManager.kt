@@ -177,14 +177,23 @@ object SpeedtestManager {
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
 
         try {
+            // Tier 1: Hetzner (reliable, but a shared exit IP can trip its abuse/rate limiting).
+            // Tier 2: Cloudflare.
+            // Tier 3: self-hosted "Speedtest Mini" mirrors known reachable from this network
+            // (see AppConfig.SPEED_TEST_MINI_SERVERS) — a different provider/network path, so a
+            // block or rate-limit hitting tiers 1-2 usually doesn't hit these too.
             val urls = listOf(
                 AppConfig.SPEED_TEST_DL_PRIMARY,
                 "${AppConfig.SPEED_TEST_DL_FALLBACK}?bytes=${AppConfig.SPEED_TEST_MAX_BYTES}"
-            )
+            ) + AppConfig.SPEED_TEST_MINI_SERVERS.map { "http://$it${AppConfig.SPEED_TEST_MINI_DL_PATH}" }
             for ((index, url) in urls.withIndex()) {
                 var conn: HttpURLConnection? = null
                 try {
-                    conn = openGetConnection(url, proxy) ?: continue
+                    conn = openGetConnection(url, proxy)
+                    if (conn == null) {
+                        LogUtil.e(AppConfig.TAG, "testDownloadSpeed[$index] $url → connection failed, trying next")
+                        continue
+                    }
 
                     val buffer  = ByteArray(64 * 1024)
                     var total   = 0L
@@ -214,14 +223,18 @@ object SpeedtestManager {
                     }
 
                     val elapsed = System.currentTimeMillis() - start
-                    if (!gotFirstByte) continue   // no data — try fallback
+                    if (!gotFirstByte) {
+                        LogUtil.e(AppConfig.TAG, "testDownloadSpeed[$index] $url → no data received, trying next")
+                        continue   // no data — try fallback
+                    }
 
                     if (elapsed <= 0 || total <= 0) return null
                     val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
+                    LogUtil.e(AppConfig.TAG, "testDownloadSpeed[$index] $url → OK: ${"%.1f".format(mbps)} Mbps ($total bytes / ${elapsed}ms)")
                     return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
 
                 } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "testDownloadSpeed[$index] failed: ${e.message}")
+                    LogUtil.e(AppConfig.TAG, "testDownloadSpeed[$index] $url failed: ${e.javaClass.simpleName}: ${e.message}")
                     if (index == urls.lastIndex) return null
                 } finally {
                     conn?.disconnect()
@@ -257,7 +270,13 @@ object SpeedtestManager {
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
 
         try {
-            val urls = listOf(AppConfig.SPEED_TEST_UL_PRIMARY, AppConfig.SPEED_TEST_UL_FALLBACK)
+            // Tier 1: Cloudflare. Tier 2+: self-hosted "Speedtest Mini" mirrors known reachable
+            // from this network (see AppConfig.SPEED_TEST_MINI_SERVERS) — PRIMARY and FALLBACK
+            // used to be the exact same URL, so a Cloudflare failure never actually had a
+            // fallback; this gives it one on a different provider/network path.
+            val urls = listOf(AppConfig.SPEED_TEST_UL_PRIMARY, AppConfig.SPEED_TEST_UL_FALLBACK) +
+                AppConfig.SPEED_TEST_MINI_SERVERS.drop(1)
+                    .map { "http://$it${AppConfig.SPEED_TEST_MINI_UL_PATH}" }
             for ((index, url) in urls.withIndex()) {
                 var conn: HttpURLConnection? = null
                 var watchdog: Timer? = null
@@ -276,6 +295,7 @@ object SpeedtestManager {
                     }
                     conn.connect()
                     activeConnection = conn
+                    LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] $url → connected, streaming body")
 
                     // Hard backstop: disconnect() from another thread interrupts any blocked
                     // write()/getResponseCode() call, forcing it to throw immediately instead of
@@ -328,6 +348,7 @@ object SpeedtestManager {
                         output.close()
 
                         if (stalled || !connected) {
+                            LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] $url → stalled before first write, trying next")
                             if (index == urls.lastIndex) return null else continue
                         }
 
@@ -335,26 +356,28 @@ object SpeedtestManager {
                         val elapsed = System.currentTimeMillis() - start
 
                         if (responseCode !in 200..299) {
-                            LogUtil.e(AppConfig.TAG, "UL $url ack → $responseCode")
+                            LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] $url ack → HTTP $responseCode, trying next")
                             if (index == urls.lastIndex) return null else continue
                         }
                         if (elapsed <= 0 || total <= 0) {
+                            LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] $url → zero bytes/elapsed, trying next")
                             if (index == urls.lastIndex) return null else continue
                         }
 
                         val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
+                        LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] $url → OK: ${"%.1f".format(mbps)} Mbps ($total bytes / ${elapsed}ms)")
                         return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
 
                     } catch (e: IOException) {
                         // Server closed early, watchdog fired, or the ack never arrived — we
                         // can't confirm real throughput, so this attempt is a failure rather than
                         // a guess. Try again instead of reporting a made-up number.
-                        LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] IO: ${e.message}")
+                        LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] $url IO: ${e.javaClass.simpleName}: ${e.message}")
                         if (index == urls.lastIndex) return null
                     }
 
                 } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] failed: ${e.message}")
+                    LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] $url failed: ${e.javaClass.simpleName}: ${e.message}")
                     if (index == urls.lastIndex) return null
                 } finally {
                     watchdog?.cancel()

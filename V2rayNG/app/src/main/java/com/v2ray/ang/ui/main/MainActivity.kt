@@ -105,7 +105,16 @@ class MainActivity : HelperBaseComponentActivity() {
             onAction = { action ->
                 when (action) {
                     MainAction.ToggleService -> handleFabAction()
-                    MainAction.TestCurrentServer -> handleLayoutTestClick()
+                    MainAction.TestCurrentServer -> {
+                        // The ViewModel's own TestCurrentServer branch is what clears any
+                        // active/finished speed-test session (speedTestResultText, lastPingMs,
+                        // etc.) so the UI falls back to the plain ping+IP display. Previously this
+                        // branch only called handleLayoutTestClick() and never forwarded the
+                        // action to the ViewModel at all, so that clear-out never ran and a tap
+                        // on the results row did nothing visible.
+                        mainViewModel.onAction(action)
+                        handleLayoutTestClick()
+                    }
                     MainAction.ImportQRcode -> importQRcode()
                     MainAction.ImportClipboard -> importClipboard()
                     MainAction.ImportConfigLocal -> importConfigLocal()

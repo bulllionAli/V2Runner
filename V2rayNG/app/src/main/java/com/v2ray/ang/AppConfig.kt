@@ -165,11 +165,37 @@ object AppConfig {
     // in their response. For a 20 MB upload, an echo endpoint means waiting for another ~20+ MB
     // to come back down before we can confirm the upload finished — that's what was causing the
     // test to sit on "Waiting..." indefinitely. Cloudflare's endpoint has no such problem.
-    // Primary and fallback intentionally point at the same (reliable, anycast-routed) host: a
-    // second attempt naturally retries against Cloudflare's network again rather than reusing
-    // a possibly-bad connection, without reintroducing an echo endpoint as a "fallback".
     const val SPEED_TEST_UL_PRIMARY   = "https://speed.cloudflare.com/__up"
-    const val SPEED_TEST_UL_FALLBACK  = "https://speed.cloudflare.com/__up"
+    // Real fallback (was a no-op duplicate of PRIMARY before): a public Ookla "Speedtest Mini"
+    // instance found by sniffing which hosts Throne actually reaches from this network
+    // (see SPEED_TEST_MINI_SERVERS below for the rest of that list). If Hetzner/Cloudflare are
+    // throttled or blocked on this network/exit-IP, a self-hosted mirror on ordinary web hosting
+    // is much less likely to be caught by the same blocking rule.
+    const val SPEED_TEST_UL_FALLBACK  = "https://speedtest.previder.net:8080/speedtest/upload.php"
+
+    // Self-hosted Ookla "Speedtest Mini" mirrors (the same open-source server package the
+    // official Ookla apps use when a user runs their own node). Discovered from a sing-box log
+    // of Throne connecting from this exact network — since they already proved reachable here,
+    // they're a good extra fallback tier when Hetzner/Cloudflare get rate-limited ("limited"
+    // responses) or blocked outright. All speak the same HTTP protocol on port 8080:
+    //   download: GET  {host}/speedtest/random4000x4000.jpg   (~4.5 MB image, fetched repeatedly)
+    //   upload:   POST {host}/speedtest/upload.php             (raw body, discarded; tiny reply)
+    // NOTE: plain HTTP, not HTTPS — these mini installs don't all terminate TLS on 8080.
+    val SPEED_TEST_MINI_SERVERS = listOf(
+        "speedtest.previder.net:8080",
+        "nl.tanhost.com:8080",
+        "speedtest.redhosting.nl:8080",
+        "speedtest.trined.nl:8080",
+        "speedtest.matrixdata.nl:8080",
+        "mirror.nforce.com:8080",
+        "ookla.snt.utwente.nl:8080",
+        "speedtest.vanberkelgroep.nl:8080",
+        "speedtest.nl1.mirhosting.net:8080",
+        "speedtest.rtm.t-mobile.nl:8080",
+        "speedtest.breedband.nl:8080",
+    )
+    const val SPEED_TEST_MINI_DL_PATH = "/speedtest/random4000x4000.jpg"
+    const val SPEED_TEST_MINI_UL_PATH = "/speedtest/upload.php"
 
     // Absolute ceiling for one upload attempt (connect + write + wait-for-ack), enforced by a
     // watchdog that force-disconnects the connection if exceeded. This is a hard backstop:
