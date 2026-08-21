@@ -826,28 +826,17 @@ class MainViewModel(
     }
 
     /**
-     * Converts a 2-letter ISO 3166-1 alpha-2 country code to its emoji flag.
-     * Each letter maps to a Regional Indicator Symbol (U+1F1E6..U+1F1FF).
-     * e.g. "GB" → "🇬🇧", "US" → "🇺🇸"
-     */
-    private fun countryCodeToFlag(code: String): String {
-        if (code.length != 2) return code
-        val base = 0x1F1E6 - 'A'.code
-        return String(Character.toChars(base + code[0].uppercaseChar().code)) +
-               String(Character.toChars(base + code[1].uppercaseChar().code))
-    }
-
-    /**
-     * Builds the flag + IP label from a ping result.
-     * e.g. "🇬🇧 141.98.101.181"
-     * Returns null when neither country nor IP is available.
+     * Builds the "[country] ip" label for the speed-test result line, from the exact same
+     * raw `country`/`ipAddress` values the default single-tap display already shows (just in
+     * brackets instead of parens, per the speed-test line's own format) — never re-derived.
+     * e.g. "[GB] 141.98.101.181". Returns null when neither country nor IP is available.
      */
     private fun buildIpLabel(result: ConnectionTestResult): String? {
         val country = result.country
         val ip      = result.ipAddress
         if (country == null && ip == null) return null
-        val flag = if (country != null) countryCodeToFlag(country) else null
-        return listOfNotNull(flag, ip).joinToString(" ")
+        val countryPart = if (country != null) "[$country]" else null
+        return listOfNotNull(countryPart, ip).joinToString(" ")
     }
 
     /**
@@ -973,6 +962,10 @@ class MainViewModel(
         speedTestJob?.cancel()
         speedTestJob = null
         pendingSpeedTestPing = false
+        // Job.cancel() only takes effect at suspension points — testDownloadSpeed()/
+        // testUploadSpeed() are blocking calls, so without this the socket would keep
+        // reading/writing in the background even after the UI has moved on.
+        SpeedtestManager.cancelActiveTest()
         _uiState.update {
             it.copy(
                 showSpeedTestMenu = false,

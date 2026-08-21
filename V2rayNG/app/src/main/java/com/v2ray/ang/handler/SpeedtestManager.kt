@@ -15,9 +15,28 @@ import java.net.Proxy
 import java.net.Socket
 import java.net.URL
 import java.net.UnknownHostException
+import java.util.Timer
+import java.util.TimerTask
 import kotlin.random.Random
 
 object SpeedtestManager {
+
+    // Coroutine Job.cancel() does NOT interrupt blocking java.net I/O (connect/read/write) —
+    // it only takes effect at suspension points, and testDownloadSpeed()/testUploadSpeed() are
+    // plain blocking calls. So if the VPN is disconnected or the config is switched mid-test,
+    // cancelling the coroutine alone leaves the socket happily reading/writing in the
+    // background. This reference lets the caller forcibly abort the *actual* connection.
+    @Volatile
+    private var activeConnection: HttpURLConnection? = null
+
+    /**
+     * Immediately aborts whatever download/upload speed test attempt is currently in flight,
+     * by disconnecting its underlying connection. Safe to call when nothing is running.
+     * Call this whenever the VPN disconnects or the active config changes mid speed-test.
+     */
+    fun cancelActiveTest() {
+        try { activeConnection?.disconnect() } catch (_: Exception) {}
+    }
 
     data class RemoteEndpointInfo(
         val country: String?,
@@ -121,6 +140,7 @@ object SpeedtestManager {
                 setRequestProperty("Connection", "close")
             }
             conn.connect()
+            activeConnection = conn
             if (conn.responseCode !in 200..299) {
                 LogUtil.e(AppConfig.TAG, "GET $url → ${conn.responseCode}")
                 conn.disconnect()
@@ -205,6 +225,7 @@ object SpeedtestManager {
                     if (index == urls.lastIndex) return null
                 } finally {
                     conn?.disconnect()
+                    activeConnection = null
                 }
             }
             return null
@@ -220,11 +241,10 @@ object SpeedtestManager {
      *
      * Streams a repeating random buffer as a chunked POST body until
      * [AppConfig.SPEED_TEST_MAX_BYTES] or [AppConfig.SPEED_TEST_DURATION_MS]
-     * is reached — whichever comes first.
-     *
-     * Tries [AppConfig.SPEED_TEST_UL_PRIMARY] first; falls back to
-     * [AppConfig.SPEED_TEST_UL_FALLBACK] if no bytes are acknowledged within
-     * [AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS].
+     * is reached — whichever comes first. A watchdog guarantees the whole attempt
+     * (connect + write + wait-for-ack) can never exceed
+     * [AppConfig.SPEED_TEST_UPLOAD_HARD_DEADLINE_MS], so this can never sit on
+     * "Waiting..." forever regardless of what the server does.
      */
     fun testUploadSpeed(): SpeedTestResult? {
         val socksPort = SettingsManager.getSocksPort()
@@ -240,6 +260,7 @@ object SpeedtestManager {
             val urls = listOf(AppConfig.SPEED_TEST_UL_PRIMARY, AppConfig.SPEED_TEST_UL_FALLBACK)
             for ((index, url) in urls.withIndex()) {
                 var conn: HttpURLConnection? = null
+                var watchdog: Timer? = null
                 try {
                     conn = (URL(url).openConnection(proxy) as HttpURLConnection).apply {
                         connectTimeout = AppConfig.SPEED_TEST_CONNECT_TIMEOUT_MS
@@ -254,6 +275,20 @@ object SpeedtestManager {
                         setRequestProperty("Connection", "close")
                     }
                     conn.connect()
+                    activeConnection = conn
+
+                    // Hard backstop: disconnect() from another thread interrupts any blocked
+                    // write()/getResponseCode() call, forcing it to throw immediately instead of
+                    // hanging. This is what guarantees "Waiting..." has an absolute ceiling.
+                    val watchedConn = conn
+                    watchdog = Timer(true).apply {
+                        schedule(object : TimerTask() {
+                            override fun run() {
+                                LogUtil.e(AppConfig.TAG, "UL watchdog: hard deadline hit, aborting")
+                                try { watchedConn.disconnect() } catch (_: Exception) {}
+                            }
+                        }, AppConfig.SPEED_TEST_UPLOAD_HARD_DEADLINE_MS)
+                    }
 
                     val buffer = ByteArray(64 * 1024).also { Random.nextBytes(it) }
                     var total     = 0L
@@ -311,9 +346,9 @@ object SpeedtestManager {
                         return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
 
                     } catch (e: IOException) {
-                        // Server closed early, or the ack never arrived within readTimeout — we
+                        // Server closed early, watchdog fired, or the ack never arrived — we
                         // can't confirm real throughput, so this attempt is a failure rather than
-                        // a guess. Try the fallback URL instead of reporting a made-up number.
+                        // a guess. Try again instead of reporting a made-up number.
                         LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] IO: ${e.message}")
                         if (index == urls.lastIndex) return null
                     }
@@ -322,7 +357,9 @@ object SpeedtestManager {
                     LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] failed: ${e.message}")
                     if (index == urls.lastIndex) return null
                 } finally {
+                    watchdog?.cancel()
                     try { conn?.disconnect() } catch (_: Exception) {}
+                    activeConnection = null
                 }
             }
             return null

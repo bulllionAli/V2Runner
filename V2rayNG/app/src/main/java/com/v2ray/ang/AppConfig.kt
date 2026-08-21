@@ -159,10 +159,22 @@ object AppConfig {
     // fallback attempt fails. SpeedtestManager appends "?bytes=$SPEED_TEST_MAX_BYTES" to this.
     const val SPEED_TEST_DL_FALLBACK  = "https://speed.cloudflare.com/__down"
 
-    // Primary upload test: httpbin echo — accepts any POST body, no rate limit
-    const val SPEED_TEST_UL_PRIMARY   = "https://httpbin.org/post"
-    // Fallback upload test: Cloudflare (used if primary fails or times out after 3 s)
+    // Upload test target: Cloudflare's dedicated speed-test endpoint. It accepts the POST body
+    // and discards it, returning a tiny JSON response — unlike generic "echo" test endpoints
+    // (httpbin.org/post, postman-echo.com/post, etc.) which mirror the entire request body back
+    // in their response. For a 20 MB upload, an echo endpoint means waiting for another ~20+ MB
+    // to come back down before we can confirm the upload finished — that's what was causing the
+    // test to sit on "Waiting..." indefinitely. Cloudflare's endpoint has no such problem.
+    // Primary and fallback intentionally point at the same (reliable, anycast-routed) host: a
+    // second attempt naturally retries against Cloudflare's network again rather than reusing
+    // a possibly-bad connection, without reintroducing an echo endpoint as a "fallback".
+    const val SPEED_TEST_UL_PRIMARY   = "https://speed.cloudflare.com/__up"
     const val SPEED_TEST_UL_FALLBACK  = "https://speed.cloudflare.com/__up"
+
+    // Absolute ceiling for one upload attempt (connect + write + wait-for-ack), enforced by a
+    // watchdog that force-disconnects the connection if exceeded. This is a hard backstop:
+    // whatever the server does, "Waiting..." can never persist past this, ever.
+    const val SPEED_TEST_UPLOAD_HARD_DEADLINE_MS = 20_000L
 
     /** Cap for both download and upload tests: stop at whichever comes first. */
     const val SPEED_TEST_MAX_BYTES    = 20L * 1024 * 1024   // 20 MB
