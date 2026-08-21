@@ -166,7 +166,7 @@ object SpeedtestManager {
      *  - [AppConfig.SPEED_TEST_DURATION_MS] elapsed
      *  - connection ends
      */
-    fun testDownloadSpeed(): SpeedTestResult? {
+    fun testDownloadSpeed(onProgress: ((Double) -> Unit)? = null): SpeedTestResult? {
         val socksPort = SettingsManager.getSocksPort()
         if (socksPort == 0) return null
 
@@ -199,6 +199,7 @@ object SpeedtestManager {
                     var total   = 0L
                     val start   = System.currentTimeMillis()
                     var gotFirstByte = false
+                    var lastReportMs = start
 
                     conn.inputStream.use { input ->
                         while (true) {
@@ -219,6 +220,14 @@ object SpeedtestManager {
                             if (n <= 0) break
                             total += n
                             gotFirstByte = true
+
+                            // Live running-average mbps, throttled so we don't flood the UI.
+                            if (onProgress != null && elapsed > 0 &&
+                                now - lastReportMs >= AppConfig.SPEED_TEST_PROGRESS_INTERVAL_MS
+                            ) {
+                                onProgress((total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0)
+                                lastReportMs = now
+                            }
                         }
                     }
 
@@ -259,7 +268,7 @@ object SpeedtestManager {
      * [AppConfig.SPEED_TEST_UPLOAD_HARD_DEADLINE_MS], so this can never sit on
      * "Waiting..." forever regardless of what the server does.
      */
-    fun testUploadSpeed(): SpeedTestResult? {
+    fun testUploadSpeed(onProgress: ((Double) -> Unit)? = null): SpeedTestResult? {
         val socksPort = SettingsManager.getSocksPort()
         if (socksPort == 0) return null
 
@@ -315,6 +324,7 @@ object SpeedtestManager {
                     val start     = System.currentTimeMillis()
                     var connected = false
                     var stalled   = false
+                    var lastReportMs = start
 
                     val output = conn.outputStream
                     try {
@@ -322,8 +332,12 @@ object SpeedtestManager {
                             val now     = System.currentTimeMillis()
                             val elapsed = now - start
 
-                            // Fallback trigger: nothing accepted by the local socket in 3s
-                            if (!connected && elapsed >= AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS) {
+                            // Fallback trigger: nothing accepted by the local socket in
+                            // SPEED_TEST_UPLOAD_STALL_TRIGGER_MS. Not the same 3 s threshold used
+                            // for pre-connect reachability — conn.connect() already succeeded, so
+                            // this only needs to catch a server that never reads the body, not a
+                            // slow-but-working uplink.
+                            if (!connected && elapsed >= AppConfig.SPEED_TEST_UPLOAD_STALL_TRIGGER_MS) {
                                 LogUtil.e(AppConfig.TAG, "UL primary stalled before first write, switching to fallback")
                                 stalled = true
                                 break
@@ -337,6 +351,14 @@ object SpeedtestManager {
                             output.flush()
                             total    += chunk
                             connected = true
+
+                            // Live running-average mbps, throttled so we don't flood the UI.
+                            if (onProgress != null && elapsed > 0 &&
+                                now - lastReportMs >= AppConfig.SPEED_TEST_PROGRESS_INTERVAL_MS
+                            ) {
+                                onProgress((total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0)
+                                lastReportMs = now
+                            }
                         }
 
                         // output.write()/flush() only prove the bytes reached the *local* socket

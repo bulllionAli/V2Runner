@@ -199,8 +199,12 @@ object AppConfig {
 
     // Absolute ceiling for one upload attempt (connect + write + wait-for-ack), enforced by a
     // watchdog that force-disconnects the connection if exceeded. This is a hard backstop:
-    // whatever the server does, "Waiting..." can never persist past this, ever.
-    const val SPEED_TEST_UPLOAD_HARD_DEADLINE_MS = 20_000L
+    // whatever the server does, this can never persist past this, ever.
+    // Raised from 20s → 40s: on a genuinely slow uplink (e.g. ~0.5 Mbps Wi-Fi) the write loop
+    // can legitimately still be draining its last buffered chunk, plus waiting out
+    // SPEED_TEST_READ_TIMEOUT_MS for the server's ack, well past the old 20s ceiling — which was
+    // aborting perfectly good slow uploads and making them look "completely broken".
+    const val SPEED_TEST_UPLOAD_HARD_DEADLINE_MS = 40_000L
 
     /** Cap for both download and upload tests: stop at whichever comes first. */
     const val SPEED_TEST_MAX_BYTES    = 20L * 1024 * 1024   // 20 MB
@@ -211,8 +215,24 @@ object AppConfig {
     // to 30+ second "Waiting..." states. Keep this in lockstep with SPEED_TEST_FALLBACK_TRIGGER_MS
     // so "3 seconds with nothing happening" means the same thing at every stage of the test.
     const val SPEED_TEST_CONNECT_TIMEOUT_MS  = 3_000          // 3 s connect timeout
-    const val SPEED_TEST_READ_TIMEOUT_MS     = 10_000         // 10 s read timeout (bounds stalls mid-transfer / the final ack wait)
+    // Raised from 10s → 20s: this bounds conn.responseCode's wait for the server's ack after
+    // upload finishes. On a slow uplink the last bit of buffered body can still be draining onto
+    // the wire when the write loop's own DURATION_MS cap kicks in, so the ack legitimately needs
+    // more time to show up than on a fast connection.
+    const val SPEED_TEST_READ_TIMEOUT_MS     = 20_000         // 20 s read timeout (bounds stalls mid-transfer / the final ack wait)
     const val SPEED_TEST_FALLBACK_TRIGGER_MS = 3_000          // switch to fallback after 3 s of no data
+    // Upload-only, and deliberately much more generous than SPEED_TEST_FALLBACK_TRIGGER_MS above:
+    // by the time this check runs, conn.connect() has already succeeded, so the server is
+    // definitely reachable — the only thing this guards against is a server that accepts the TCP/
+    // TLS handshake but never actually reads the body. A slow (but working) uplink can easily take
+    // several seconds just to push the first 64 KB chunk out, and that's not the same failure —
+    // this used to share the 3 s threshold above, which is exactly why uploads looked "completely
+    // broken" on a ~0.5 Mbps Wi-Fi connection while working fine on fast networks.
+    const val SPEED_TEST_UPLOAD_STALL_TRIGGER_MS = 8_000L
+    // How often testDownloadSpeed/testUploadSpeed report a live running-average mbps back to the
+    // UI via their onProgress callback. Small enough to feel real-time, large enough not to spam
+    // the StateFlow with updates on every 64 KB chunk.
+    const val SPEED_TEST_PROGRESS_INTERVAL_MS = 200L
     const val OBSERVATORY_LEAST_PING_INTERVAL = "3m"
     const val OBSERVATORY_LEAST_LOAD_INTERVAL = "5m"
     const val OBSERVATORY_LEAST_LOAD_METHOD = "HEAD"
