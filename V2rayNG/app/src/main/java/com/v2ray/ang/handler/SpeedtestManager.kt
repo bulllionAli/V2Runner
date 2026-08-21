@@ -128,7 +128,6 @@ object SpeedtestManager {
         val proxyPassword = SettingsManager.getSocksPassword()
         val hasAuth = !proxyUsername.isNullOrBlank()
 
-        val previousAuthenticator = if (hasAuth) Authenticator.getDefault() else null
         if (hasAuth) {
             Authenticator.setDefault(object : Authenticator() {
                 override fun getPasswordAuthentication(): PasswordAuthentication {
@@ -172,7 +171,7 @@ object SpeedtestManager {
             null
         } finally {
             conn?.disconnect()
-            if (hasAuth) Authenticator.setDefault(previousAuthenticator)
+            if (hasAuth) Authenticator.setDefault(null)
         }
     }
 }
