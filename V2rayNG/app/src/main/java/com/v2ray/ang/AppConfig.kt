@@ -152,6 +152,7 @@ object AppConfig {
     const val DELAY_TEST_URL = "https://www.gstatic.com/generate_204"
     const val DELAY_TEST_URL2 = "https://www.google.com/generate_204"
     const val SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=20000000"
+    const val SPEED_TEST_UPLOAD_URL = "https://speed.cloudflare.com/__up"
     const val OBSERVATORY_LEAST_PING_INTERVAL = "3m"
     const val OBSERVATORY_LEAST_LOAD_INTERVAL = "5m"
     const val OBSERVATORY_LEAST_LOAD_METHOD = "HEAD"

@@ -348,6 +348,14 @@
     <string name="title_real_ping_all_server">🔎 Ping</string>
     <string name="title_speed_test">Speed test</string>
     <string name="speed_test_failed">Speed test failed</string>
+    <string name="speed_test_menu_upload">Upload Speed</string>
+    <string name="speed_test_menu_download">Download Speed</string>
+    <string name="speed_test_menu_both">Both</string>
+    <string name="speed_test_waiting">Waiting...</string>
+    <string name="speed_test_ping_prefix">Ping</string>
+    <string name="speed_test_dl_prefix">DL</string>
+    <string name="speed_test_up_prefix">UP</string>
+    <string name="speed_test_na">N/A</string>
     <string name="title_user_asset_setting">Asset files</string>
     <string name="title_sort_by_test_results">⏫ Sort By Ping</string>
     <string name="title_filter_config">Filter configs</string>

@@ -15,8 +15,18 @@ import java.net.Proxy
 import java.net.Socket
 import java.net.URL
 import java.net.UnknownHostException
+import kotlin.random.Random
 
 object SpeedtestManager {
+
+    /** Max attempts for a single speed test before giving up (used to ride out transient 429s). */
+    private const val MAX_ATTEMPTS = 2
+
+    /** Delay before retrying after an HTTP 429 (rate limited) response. */
+    private const val RATE_LIMIT_RETRY_DELAY_MS = 3000L
+
+    /** Payload size used for the upload speed test. */
+    private const val UPLOAD_TEST_BYTES = 8 * 1024 * 1024L
 
     data class RemoteEndpointInfo(
         val country: String?,
@@ -136,41 +146,142 @@ object SpeedtestManager {
             })
         }
 
-        var conn: HttpURLConnection? = null
-        return try {
-            val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
-            conn = (URL(AppConfig.SPEED_TEST_URL).openConnection(proxy) as HttpURLConnection).apply {
-                connectTimeout = 6000
-                readTimeout = timeoutMs
-                requestMethod = "GET"
-            }
-            conn.connect()
-            if (conn.responseCode !in 200..299) {
-                LogUtil.e(AppConfig.TAG, "testDownloadSpeed http ${conn.responseCode}")
-                return null
-            }
+        try {
+            for (attempt in 1..MAX_ATTEMPTS) {
+                var conn: HttpURLConnection? = null
+                try {
+                    val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
+                    conn = (URL(AppConfig.SPEED_TEST_URL).openConnection(proxy) as HttpURLConnection).apply {
+                        connectTimeout = 6000
+                        readTimeout = timeoutMs
+                        requestMethod = "GET"
+                    }
+                    conn.connect()
 
-            val buffer = ByteArray(64 * 1024)
-            var total = 0L
-            val start = System.currentTimeMillis()
-            conn.inputStream.use { input ->
-                while (true) {
-                    if (System.currentTimeMillis() - start > timeoutMs) break
-                    val n = input.read(buffer)
-                    if (n <= 0) break
-                    total += n
+                    if (conn.responseCode == 429) {
+                        LogUtil.e(AppConfig.TAG, "testDownloadSpeed http 429 (rate limited), attempt $attempt")
+                        if (attempt < MAX_ATTEMPTS) {
+                            conn.disconnect()
+                            Thread.sleep(RATE_LIMIT_RETRY_DELAY_MS)
+                            continue
+                        }
+                        return null
+                    }
+                    if (conn.responseCode !in 200..299) {
+                        LogUtil.e(AppConfig.TAG, "testDownloadSpeed http ${conn.responseCode}")
+                        return null
+                    }
+
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    val start = System.currentTimeMillis()
+                    conn.inputStream.use { input ->
+                        while (true) {
+                            if (System.currentTimeMillis() - start > timeoutMs) break
+                            val n = input.read(buffer)
+                            if (n <= 0) break
+                            total += n
+                        }
+                    }
+                    val elapsed = System.currentTimeMillis() - start
+                    if (elapsed <= 0 || total <= 0) return null
+
+                    val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
+                    return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "testDownloadSpeed failed", e)
+                    return null
+                } finally {
+                    conn?.disconnect()
                 }
             }
-            val elapsed = System.currentTimeMillis() - start
-            if (elapsed <= 0 || total <= 0) return null
-
-            val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
-            SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
-        } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "testDownloadSpeed failed", e)
-            null
+            return null
         } finally {
-            conn?.disconnect()
+            if (hasAuth) Authenticator.setDefault(null)
+        }
+    }
+
+    /**
+     * Measures upload throughput by streaming a fixed-size buffer of random bytes to
+     * [AppConfig.SPEED_TEST_UPLOAD_URL] through the local SOCKS inbound. Mirrors
+     * [testDownloadSpeed]: same proxy/auth handling and the same retry-on-429 behavior,
+     * since the exit IP can be shared and rate limited by the upstream test endpoint.
+     *
+     * Requires the VPN/proxy service to already be running.
+     *
+     * @return the measured result, or null if not connected / on failure.
+     */
+    fun testUploadSpeed(timeoutMs: Int = 20_000): SpeedTestResult? {
+        val socksPort = SettingsManager.getSocksPort()
+        if (socksPort == 0) return null
+
+        val proxyUsername = SettingsManager.getSocksUsername()
+        val proxyPassword = SettingsManager.getSocksPassword()
+        val hasAuth = !proxyUsername.isNullOrBlank()
+
+        if (hasAuth) {
+            Authenticator.setDefault(object : Authenticator() {
+                override fun getPasswordAuthentication(): PasswordAuthentication {
+                    return PasswordAuthentication(proxyUsername, (proxyPassword ?: "").toCharArray())
+                }
+            })
+        }
+
+        try {
+            for (attempt in 1..MAX_ATTEMPTS) {
+                var conn: HttpURLConnection? = null
+                try {
+                    val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
+                    conn = (URL(AppConfig.SPEED_TEST_UPLOAD_URL).openConnection(proxy) as HttpURLConnection).apply {
+                        connectTimeout = 6000
+                        readTimeout = timeoutMs
+                        requestMethod = "POST"
+                        doOutput = true
+                        setFixedLengthStreamingMode(UPLOAD_TEST_BYTES)
+                        setRequestProperty("Content-Type", "application/octet-stream")
+                    }
+                    conn.connect()
+
+                    val buffer = ByteArray(64 * 1024)
+                    Random.nextBytes(buffer)
+                    var total = 0L
+                    val start = System.currentTimeMillis()
+                    conn.outputStream.use { output ->
+                        while (total < UPLOAD_TEST_BYTES) {
+                            if (System.currentTimeMillis() - start > timeoutMs) break
+                            val chunk = (UPLOAD_TEST_BYTES - total).coerceAtMost(buffer.size.toLong()).toInt()
+                            output.write(buffer, 0, chunk)
+                            total += chunk
+                        }
+                    }
+                    val elapsed = System.currentTimeMillis() - start
+
+                    if (conn.responseCode == 429) {
+                        LogUtil.e(AppConfig.TAG, "testUploadSpeed http 429 (rate limited), attempt $attempt")
+                        if (attempt < MAX_ATTEMPTS) {
+                            conn.disconnect()
+                            Thread.sleep(RATE_LIMIT_RETRY_DELAY_MS)
+                            continue
+                        }
+                        return null
+                    }
+                    if (conn.responseCode !in 200..299) {
+                        LogUtil.e(AppConfig.TAG, "testUploadSpeed http ${conn.responseCode}")
+                        return null
+                    }
+                    if (elapsed <= 0 || total <= 0) return null
+
+                    val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
+                    return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
+                } catch (e: Exception) {
+                    LogUtil.e(AppConfig.TAG, "testUploadSpeed failed", e)
+                    return null
+                } finally {
+                    conn?.disconnect()
+                }
+            }
+            return null
+        } finally {
             if (hasAuth) Authenticator.setDefault(null)
         }
     }

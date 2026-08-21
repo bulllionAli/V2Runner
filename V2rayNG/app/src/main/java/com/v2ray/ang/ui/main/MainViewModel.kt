@@ -79,6 +79,11 @@ class MainViewModel(
     @Volatile
     private var testingGroupId: String? = null
 
+    // ---------- Speed test session ----------
+    @Volatile
+    private var pendingSpeedTestPing: Boolean = false
+    private var speedTestJob: Job? = null
+
     private val initialPageReady = CompletableDeferred<Unit>()
 
     // ---------- Service events ----------
@@ -111,7 +116,12 @@ class MainViewModel(
 
             MainServiceEvent.StateStopSuccess -> updateRunningState(false)
             is MainServiceEvent.MeasureDelayResult -> {
-                _uiState.update { it.copy(status = MainStatus.ConnectionTest(event.result)) }
+                if (pendingSpeedTestPing) {
+                    pendingSpeedTestPing = false
+                    onSpeedTestPingResult(event.result)
+                } else {
+                    _uiState.update { it.copy(status = MainStatus.ConnectionTest(event.result)) }
+                }
             }
 
             MainServiceEvent.MeasureConfigSuccess -> {
@@ -207,9 +217,12 @@ class MainViewModel(
             MainAction.DismissFixIpDialog -> _uiState.update { it.copy(showFixIpDialog = false) }
             MainAction.UpdateFixedIpList -> updateFixedIpList()
 
+            MainAction.OpenSpeedTestMenu -> openSpeedTestMenu()
+            MainAction.DismissSpeedTestMenu -> dismissSpeedTestMenu()
+            is MainAction.StartSpeedTest -> startSpeedTest(action.mode)
+
             MainAction.ToggleService,
             MainAction.TestCurrentServer,
-            MainAction.TestSpeed,
             MainAction.ImportQRcode,
             MainAction.ImportClipboard,
             MainAction.ImportConfigLocal,
@@ -702,6 +715,7 @@ class MainViewModel(
 
     fun updateSelectedGuid(guid: String) {
         dataSource.setSelectServer(guid)
+        if (uiState.value.speedTestMode != null) clearSpeedTestSession()
         _uiState.update { it.copy(selectedGuid = guid) }
     }
 
@@ -781,24 +795,102 @@ class MainViewModel(
         dataSource.testCurrentServerRealPing()
     }
 
-    fun testCurrentServerSpeed() {
+    private fun openSpeedTestMenu() {
         if (!uiState.value.isRunning) {
             toast(R.string.toast_action_not_allowed)
             return
         }
         if (uiState.value.isSpeedTesting) return
-        _uiState.update { it.copy(isSpeedTesting = true, speedTestResultText = null) }
-        viewModelScope.launch(ioDispatcher) {
-            val result = SpeedtestManager.testDownloadSpeed()
-            withContext(Dispatchers.Main) {
-                _uiState.update {
-                    it.copy(
-                        isSpeedTesting = false,
-                        speedTestResultText = result?.let { r -> "↓ %.1f Mbps".format(r.mbps) }
-                    )
-                }
-                if (result == null) toast(R.string.speed_test_failed)
+        _uiState.update { it.copy(showSpeedTestMenu = true) }
+    }
+
+    private fun dismissSpeedTestMenu() {
+        _uiState.update { it.copy(showSpeedTestMenu = false) }
+    }
+
+    private fun startSpeedTest(mode: SpeedTestMode) {
+        if (!uiState.value.isRunning) {
+            toast(R.string.toast_action_not_allowed)
+            return
+        }
+        if (uiState.value.isSpeedTesting) return
+        _uiState.update {
+            it.copy(
+                showSpeedTestMenu = false,
+                speedTestMode = mode,
+                isSpeedTesting = true,
+                speedTestResultText = dataSource.getString(R.string.speed_test_waiting)
+            )
+        }
+        pendingSpeedTestPing = true
+        dataSource.testCurrentServerRealPing()
+    }
+
+    private fun onSpeedTestPingResult(result: ConnectionTestResult) {
+        val mode = uiState.value.speedTestMode ?: return
+        if (result.delayMillis < 0) {
+            _uiState.update {
+                it.copy(isSpeedTesting = false, speedTestResultText = dataSource.getString(R.string.speed_test_failed))
             }
+            return
+        }
+        val pingLabel = dataSource.getString(R.string.speed_test_ping_prefix)
+        val waitingLabel = dataSource.getString(R.string.speed_test_waiting)
+        val pingText = "$pingLabel ${result.delayMillis}"
+        _uiState.update { it.copy(speedTestResultText = "$pingText  $waitingLabel") }
+        runSpeedTestPhases(mode, pingText)
+    }
+
+    private fun runSpeedTestPhases(mode: SpeedTestMode, pingText: String) {
+        speedTestJob = viewModelScope.launch(ioDispatcher) {
+            val waitingLabel = dataSource.getString(R.string.speed_test_waiting)
+            val dlLabel = dataSource.getString(R.string.speed_test_dl_prefix)
+            val upLabel = dataSource.getString(R.string.speed_test_up_prefix)
+            val naLabel = dataSource.getString(R.string.speed_test_na)
+
+            var dlText: String? = null
+            var upText: String? = null
+
+            if (mode == SpeedTestMode.DOWNLOAD || mode == SpeedTestMode.BOTH) {
+                val result = SpeedtestManager.testDownloadSpeed()
+                dlText = "$dlLabel: " + (result?.let { "%.1f".format(it.mbps) } ?: naLabel)
+                if (mode == SpeedTestMode.BOTH) {
+                    withContext(Dispatchers.Main) {
+                        _uiState.update { state ->
+                            if (state.speedTestMode != mode) return@update state
+                            state.copy(speedTestResultText = "$pingText  $dlText  $waitingLabel")
+                        }
+                    }
+                }
+            }
+
+            if (mode == SpeedTestMode.UPLOAD || mode == SpeedTestMode.BOTH) {
+                val result = SpeedtestManager.testUploadSpeed()
+                upText = "$upLabel: " + (result?.let { "%.1f".format(it.mbps) } ?: naLabel)
+            }
+
+            withContext(Dispatchers.Main) {
+                _uiState.update { state ->
+                    if (state.speedTestMode != mode) return@update state
+                    val parts = listOfNotNull(dlText, upText).joinToString("  ")
+                    state.copy(isSpeedTesting = false, speedTestResultText = "$pingText  $parts")
+                }
+            }
+        }
+    }
+
+    /** Clears any in-progress or completed speed test session (profile switch / disconnect). */
+    private fun clearSpeedTestSession() {
+        speedTestJob?.cancel()
+        speedTestJob = null
+        pendingSpeedTestPing = false
+        _uiState.update {
+            it.copy(
+                showSpeedTestMenu = false,
+                speedTestMode = null,
+                isSpeedTesting = false,
+                speedTestResultText = null
+            )
         }
     }
 
@@ -842,6 +934,7 @@ class MainViewModel(
 
     // ---------- Running state ----------
     private fun updateRunningState(running: Boolean, clearTestingText: Boolean = true) {
+        if (!running && uiState.value.speedTestMode != null) clearSpeedTestSession()
         _uiState.update { state ->
             state.copy(
                 isRunning = running,
@@ -857,6 +950,7 @@ class MainViewModel(
         selectedGroupLoadJob?.cancel()
         reloadJob?.cancel()
         filterJob?.cancel()
+        speedTestJob?.cancel()
         cancelAllPing()
         dataSource.close()
         super.onCleared()

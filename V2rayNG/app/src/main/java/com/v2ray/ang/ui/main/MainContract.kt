@@ -13,6 +13,9 @@ sealed interface MainStatus {
     data class ConnectionTest(val result: ConnectionTestResult) : MainStatus
 }
 
+/** Which leg(s) of the speed test to run, chosen from the bottom-bar long-press menu. */
+enum class SpeedTestMode { UPLOAD, DOWNLOAD, BOTH }
+
 /**
  * A single "Fix IP" exit-proxy candidate, parsed from a share-link line
  * (e.g. `vmess://...#My%20Remark`). [remark] is the URL-decoded fragment,
@@ -41,6 +44,8 @@ data class MainUiState(
     val fixIpLoading: Boolean = false,
     val fixedIpConfigs: List<FixedIpConfig> = emptyList(),
     val exitProxyConfig: FixedIpConfig? = null,
+    val showSpeedTestMenu: Boolean = false,
+    val speedTestMode: SpeedTestMode? = null,
     val isSpeedTesting: Boolean = false,
     val speedTestResultText: String? = null,
 )
@@ -53,7 +58,9 @@ sealed interface MainAction {
     data object RefreshGroups : MainAction
     data object ToggleService : MainAction
     data object TestCurrentServer : MainAction
-    data object TestSpeed : MainAction
+    data object OpenSpeedTestMenu : MainAction
+    data object DismissSpeedTestMenu : MainAction
+    data class StartSpeedTest(val mode: SpeedTestMode) : MainAction
     data object TestAllServers : MainAction
     data object TestRealAllServers : MainAction
     data object CancelTesting : MainAction

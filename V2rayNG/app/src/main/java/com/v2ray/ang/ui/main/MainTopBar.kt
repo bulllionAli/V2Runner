@@ -6,12 +6,10 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,9 +45,6 @@ fun MainTopBar(
     onAction: (MainAction) -> Unit,
     onMoreMenuAction: (MainMoreMenuAction) -> Unit,
     exitProxyRemark: String? = null,
-    isRunning: Boolean = false,
-    isSpeedTesting: Boolean = false,
-    speedTestResultText: String? = null,
 ) {
     var showImportMenu by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
@@ -81,33 +76,6 @@ fun MainTopBar(
             }
         },
         actions = {
-            if (!showSearch && speedTestResultText != null) {
-                Text(
-                    text = speedTestResultText,
-                    style = MaterialTheme.typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(end = 4.dp)
-                )
-            }
-            if (!showSearch) {
-                IconButton(
-                    onClick = { onAction(MainAction.TestSpeed) },
-                    enabled = isRunning && !isSpeedTesting
-                ) {
-                    if (isSpeedTesting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            painterResource(R.drawable.ic_cloud_download_24dp),
-                            contentDescription = stringResource(R.string.title_speed_test)
-                        )
-                    }
-                }
-            }
             if (showFixedIps && !showSearch && !exitProxyRemark.isNullOrEmpty()) {
                 Text(
                     text = exitProxyRemark,

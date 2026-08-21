@@ -44,7 +44,11 @@ fun MainScreen(
     val groups = uiState.groups
     val isLoading by mainViewModel.isLoading.collectAsStateWithLifecycle()
     val isRunning = uiState.isRunning
-    val displayText = mainViewModel.formatStatus(uiState.status)
+    val displayText = if (uiState.speedTestMode != null) {
+        uiState.speedTestResultText ?: mainViewModel.formatStatus(uiState.status)
+    } else {
+        mainViewModel.formatStatus(uiState.status)
+    }
     val selectedGuid = uiState.selectedGuid
     val doubleColumnDisplay = uiState.doubleColumnDisplay
     val confirmRemove = uiState.confirmRemove
@@ -194,6 +198,12 @@ fun MainScreen(
             onDismiss = { onAction(MainAction.DismissFixIpDialog) }
         )
     }
+    if (uiState.showSpeedTestMenu) {
+        SpeedTestMenuDialog(
+            onSelect = { mode -> onAction(MainAction.StartSpeedTest(mode)) },
+            onDismiss = { onAction(MainAction.DismissSpeedTestMenu) }
+        )
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -227,9 +237,6 @@ fun MainScreen(
                     onMenuClick = { scope.launch { drawerState.open() } },
                     onAction = onAction,
                     exitProxyRemark = uiState.exitProxyConfig?.remark,
-                    isRunning = isRunning,
-                    isSpeedTesting = uiState.isSpeedTesting,
-                    speedTestResultText = uiState.speedTestResultText,
                     onMoreMenuAction = { action ->
                         when (action) {
                             MainMoreMenuAction.FixIp -> onAction(MainAction.OpenFixIpDialog)
