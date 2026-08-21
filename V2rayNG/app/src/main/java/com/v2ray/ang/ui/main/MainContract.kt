@@ -48,6 +48,10 @@ data class MainUiState(
     val speedTestMode: SpeedTestMode? = null,
     val isSpeedTesting: Boolean = false,
     val speedTestResultText: String? = null,
+    /** Ping ms from the last tap on the bottom bar — reused by the speed test. Null = not yet measured. */
+    val lastPingMs: Long? = null,
+    /** IP+country label from the last tap (e.g. "[GB] 141.98.101.181") — reused by the speed test. */
+    val lastIpLabel: String? = null,
 )
 
 /**

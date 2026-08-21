@@ -120,7 +120,26 @@ class MainViewModel(
                     pendingSpeedTestPing = false
                     onSpeedTestPingResult(event.result)
                 } else {
-                    _uiState.update { it.copy(status = MainStatus.ConnectionTest(event.result)) }
+                    // Normal tap: cache ping+IP for potential speed test reuse, then show status
+                    val r = event.result
+                    if (r.delayMillis >= 0) {
+                        val ipLabel = buildIpLabel(r)
+                        _uiState.update {
+                            it.copy(
+                                status = MainStatus.ConnectionTest(r),
+                                lastPingMs = r.delayMillis,
+                                lastIpLabel = ipLabel
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                status = MainStatus.ConnectionTest(r),
+                                lastPingMs = null,
+                                lastIpLabel = null
+                            )
+                        }
+                    }
                 }
             }
 
@@ -795,6 +814,52 @@ class MainViewModel(
         dataSource.testCurrentServerRealPing()
     }
 
+    /**
+     * Converts a 2-letter ISO 3166-1 alpha-2 country code to its emoji flag.
+     * Each letter maps to a Regional Indicator Symbol (U+1F1E6..U+1F1FF).
+     * e.g. "GB" → "🇬🇧", "US" → "🇺🇸"
+     */
+    private fun countryCodeToFlag(code: String): String {
+        if (code.length != 2) return code
+        val base = 0x1F1E6 - 'A'.code
+        return String(Character.toChars(base + code[0].uppercaseChar().code)) +
+               String(Character.toChars(base + code[1].uppercaseChar().code))
+    }
+
+    /**
+     * Builds the flag + IP label from a ping result.
+     * e.g. "🇬🇧 141.98.101.181"
+     * Returns null when neither country nor IP is available.
+     */
+    private fun buildIpLabel(result: ConnectionTestResult): String? {
+        val country = result.country
+        val ip      = result.ipAddress
+        if (country == null && ip == null) return null
+        val flag = if (country != null) countryCodeToFlag(country) else null
+        return listOfNotNull(flag, ip).joinToString(" ")
+    }
+
+    /**
+     * Builds the exact result line format:
+     * "Ping: 110    DL: 7.5    UP: 2.2     [GB] 141.98.101.181"
+     * Only present fields are included; IP block is always last.
+     */
+    private fun buildResultText(
+        pingMs: Long,
+        ipLabel: String?,
+        dlMbps: Float? = null,
+        upMbps: Float? = null,
+        waiting: Boolean = false,
+    ): String {
+        val sb = StringBuilder()
+        sb.append("Ping: $pingMs")
+        if (dlMbps != null) sb.append("    DL: ${"%.1f".format(dlMbps)}")
+        if (upMbps != null) sb.append("    UP: ${"%.1f".format(upMbps)}")
+        if (waiting)        sb.append("    ${dataSource.getString(R.string.speed_test_waiting)}")
+        if (ipLabel != null) sb.append("     $ipLabel")
+        return sb.toString()
+    }
+
     private fun openSpeedTestMenu() {
         if (!uiState.value.isRunning) {
             toast(R.string.toast_action_not_allowed)
@@ -814,6 +879,10 @@ class MainViewModel(
             return
         }
         if (uiState.value.isSpeedTesting) return
+
+        val cachedPing = uiState.value.lastPingMs
+        val cachedIp   = uiState.value.lastIpLabel
+
         _uiState.update {
             it.copy(
                 showSpeedTestMenu = false,
@@ -822,8 +891,17 @@ class MainViewModel(
                 speedTestResultText = dataSource.getString(R.string.speed_test_waiting)
             )
         }
-        pendingSpeedTestPing = true
-        dataSource.testCurrentServerRealPing()
+
+        if (cachedPing != null) {
+            // Already have a recent ping — skip the extra ping call
+            val initialText = buildResultText(cachedPing, cachedIp, waiting = true)
+            _uiState.update { it.copy(speedTestResultText = initialText) }
+            runSpeedTestPhases(mode, cachedPing, cachedIp)
+        } else {
+            // No cached ping — fire real ping first, then start speed phases
+            pendingSpeedTestPing = true
+            dataSource.testCurrentServerRealPing()
+        }
     }
 
     private fun onSpeedTestPingResult(result: ConnectionTestResult) {
@@ -834,31 +912,27 @@ class MainViewModel(
             }
             return
         }
-        val pingLabel = dataSource.getString(R.string.speed_test_ping_prefix)
-        val waitingLabel = dataSource.getString(R.string.speed_test_waiting)
-        val pingText = "$pingLabel ${result.delayMillis}"
-        _uiState.update { it.copy(speedTestResultText = "$pingText  $waitingLabel") }
-        runSpeedTestPhases(mode, pingText)
+        val ipLabel = buildIpLabel(result)
+        _uiState.update { it.copy(lastPingMs = result.delayMillis, lastIpLabel = ipLabel) }
+        val initialText = buildResultText(result.delayMillis, ipLabel, waiting = true)
+        _uiState.update { it.copy(speedTestResultText = initialText) }
+        runSpeedTestPhases(mode, result.delayMillis, ipLabel)
     }
 
-    private fun runSpeedTestPhases(mode: SpeedTestMode, pingText: String) {
+    private fun runSpeedTestPhases(mode: SpeedTestMode, pingMs: Long, ipLabel: String?) {
         speedTestJob = viewModelScope.launch(ioDispatcher) {
-            val waitingLabel = dataSource.getString(R.string.speed_test_waiting)
-            val dlLabel = dataSource.getString(R.string.speed_test_dl_prefix)
-            val upLabel = dataSource.getString(R.string.speed_test_up_prefix)
-            val naLabel = dataSource.getString(R.string.speed_test_na)
-
-            var dlText: String? = null
-            var upText: String? = null
+            var dlMbps: Float? = null
+            var upMbps: Float? = null
 
             if (mode == SpeedTestMode.DOWNLOAD || mode == SpeedTestMode.BOTH) {
                 val result = SpeedtestManager.testDownloadSpeed()
-                dlText = "$dlLabel: " + (result?.let { "%.1f".format(it.mbps) } ?: naLabel)
+                dlMbps = result?.mbps?.toFloat()
+
                 if (mode == SpeedTestMode.BOTH) {
                     withContext(Dispatchers.Main) {
                         _uiState.update { state ->
                             if (state.speedTestMode != mode) return@update state
-                            state.copy(speedTestResultText = "$pingText  $dlText  $waitingLabel")
+                            state.copy(speedTestResultText = buildResultText(pingMs, ipLabel, dlMbps, waiting = true))
                         }
                     }
                 }
@@ -866,14 +940,18 @@ class MainViewModel(
 
             if (mode == SpeedTestMode.UPLOAD || mode == SpeedTestMode.BOTH) {
                 val result = SpeedtestManager.testUploadSpeed()
-                upText = "$upLabel: " + (result?.let { "%.1f".format(it.mbps) } ?: naLabel)
+                upMbps = result?.mbps?.toFloat()
             }
 
             withContext(Dispatchers.Main) {
                 _uiState.update { state ->
                     if (state.speedTestMode != mode) return@update state
-                    val parts = listOfNotNull(dlText, upText).joinToString("  ")
-                    state.copy(isSpeedTesting = false, speedTestResultText = "$pingText  $parts")
+                    val text = if (dlMbps == null && upMbps == null) {
+                        dataSource.getString(R.string.speed_test_failed)
+                    } else {
+                        buildResultText(pingMs, ipLabel, dlMbps, upMbps)
+                    }
+                    state.copy(isSpeedTesting = false, speedTestResultText = text)
                 }
             }
         }
@@ -889,7 +967,9 @@ class MainViewModel(
                 showSpeedTestMenu = false,
                 speedTestMode = null,
                 isSpeedTesting = false,
-                speedTestResultText = null
+                speedTestResultText = null,
+                lastPingMs = null,
+                lastIpLabel = null
             )
         }
     }

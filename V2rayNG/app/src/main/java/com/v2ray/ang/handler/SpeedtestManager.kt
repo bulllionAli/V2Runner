@@ -19,21 +19,12 @@ import kotlin.random.Random
 
 object SpeedtestManager {
 
-    /** Max attempts for a single speed test before giving up (used to ride out transient 429s). */
-    private const val MAX_ATTEMPTS = 2
-
-    /** Delay before retrying after an HTTP 429 (rate limited) response. */
-    private const val RATE_LIMIT_RETRY_DELAY_MS = 3000L
-
-    /** Payload size used for the upload speed test. */
-    private const val UPLOAD_TEST_BYTES = 8 * 1024 * 1024L
-
     data class RemoteEndpointInfo(
         val country: String?,
         val ipAddress: String?,
     )
 
-    /** Result of a download speed test. */
+    /** Result of a speed test leg (download or upload). */
     data class SpeedTestResult(
         val mbps: Double,
         val bytesTransferred: Long,
@@ -41,38 +32,28 @@ object SpeedtestManager {
     )
 
     /**
-     * Measures the time taken to establish a TCP connection to a given URL and port.
-     *
-     * @param url The URL to connect to.
-     * @param port The port to connect to.
-     * @return The connection time in milliseconds, or -1 if the connection failed.
+     * Measures TCP connect time to [url]:[port].
+     * Returns elapsed ms, or -1 on failure.
      */
     fun socketConnectTime(url: String, port: Int, timeoutMs: Int = 1500): Long {
         var socket: Socket? = null
         val start = System.currentTimeMillis()
-
-        try {
+        return try {
             socket = Socket()
             socket.connect(InetSocketAddress(url, port), timeoutMs)
-
-            return System.currentTimeMillis() - start
+            System.currentTimeMillis() - start
         } catch (e: UnknownHostException) {
             LogUtil.e(AppConfig.TAG, "Unknown host: $url", e)
+            -1
         } catch (e: IOException) {
             LogUtil.e(AppConfig.TAG, "socketConnectTime IOException: ${e.message}")
+            -1
         } catch (e: Exception) {
             LogUtil.e(AppConfig.TAG, "Failed to establish socket connection to $url:$port", e)
+            -1
         } finally {
-            socket?.let { s ->
-                try {
-                    if (!s.isClosed) {
-                        s.close()
-                    }
-                } catch (closeEx: IOException) {
-                }
-            }
+            try { if (socket?.isClosed == false) socket.close() } catch (_: IOException) {}
         }
-        return -1
     }
 
     fun getRemoteIPInfo(): RemoteEndpointInfo? {
@@ -94,195 +75,221 @@ object SpeedtestManager {
         ) ?: return null
         val ipInfo = JsonUtil.fromJsonSafe(content, IPAPIInfo::class.java) ?: return null
 
-        val ip = listOf(
-            ipInfo.ip,
-            ipInfo.clientIp,
-            ipInfo.ip_addr,
-            ipInfo.query
-        ).firstOrNull { !it.isNullOrBlank() }
+        val ip = listOf(ipInfo.ip, ipInfo.clientIp, ipInfo.ip_addr, ipInfo.query)
+            .firstOrNull { !it.isNullOrBlank() }
+        val country = listOf(ipInfo.country_code, ipInfo.country, ipInfo.countryCode, ipInfo.location?.country_code)
+            .firstOrNull { !it.isNullOrBlank() }
 
-        val country = listOf(
-            ipInfo.country_code,
-            ipInfo.country,
-            ipInfo.countryCode,
-            ipInfo.location?.country_code
-        ).firstOrNull { !it.isNullOrBlank() }
+        return RemoteEndpointInfo(country = country, ipAddress = ip)
+    }
 
-        return RemoteEndpointInfo(
-            country = country,
-            ipAddress = ip,
-        )
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    private fun buildProxy(): Pair<Proxy, Boolean> {
+        val socksPort = SettingsManager.getSocksPort()
+        val proxy = if (socksPort != 0)
+            Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
+        else
+            Proxy.NO_PROXY
+        return Pair(proxy, socksPort != 0)
+    }
+
+    private fun setupAuth(proxyUsername: String?, proxyPassword: String?) {
+        if (!proxyUsername.isNullOrBlank()) {
+            Authenticator.setDefault(object : Authenticator() {
+                override fun getPasswordAuthentication() =
+                    PasswordAuthentication(proxyUsername, (proxyPassword ?: "").toCharArray())
+            })
+        }
     }
 
     /**
-     * Downloads [AppConfig.SPEED_TEST_URL] (a fixed-size ~20MB test file) through the
-     * local SOCKS inbound (i.e. the currently running VPN connection) and measures the
-     * effective throughput.
-     *
-     * Uses the SOCKS proxy (not HTTP) because the app's core only exposes a local HTTP
-     * inbound when running the v2fly core; with Xray core (the common case) only the
-     * SOCKS inbound is guaranteed to exist. See [SettingsManager.getSocksPort].
-     *
-     * Requires the VPN/proxy service to already be running.
-     *
-     * @param timeoutMs overall timeout for the transfer; the transfer is cut short at this
-     *  point even if the full file hasn't downloaded yet, so speed is still computed from
-     *  whatever was actually transferred.
-     * @return the measured result, or null if not connected / on failure.
+     * Opens an HTTP GET connection to [url] through [proxy].
+     * Returns a connected [HttpURLConnection] with a 2xx response, or null on failure.
+     * The caller is responsible for disconnecting.
      */
-    fun testDownloadSpeed(timeoutMs: Int = 20_000): SpeedTestResult? {
+    private fun openGetConnection(url: String, proxy: Proxy): HttpURLConnection? {
+        return try {
+            val conn = (URL(url).openConnection(proxy) as HttpURLConnection).apply {
+                connectTimeout = AppConfig.SPEED_TEST_TIMEOUT_MS
+                readTimeout    = AppConfig.SPEED_TEST_TIMEOUT_MS
+                requestMethod  = "GET"
+            }
+            conn.connect()
+            if (conn.responseCode !in 200..299) {
+                LogUtil.e(AppConfig.TAG, "GET $url → ${conn.responseCode}")
+                conn.disconnect()
+                null
+            } else conn
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "openGetConnection($url) failed: ${e.message}")
+            null
+        }
+    }
+
+    // ── Download ─────────────────────────────────────────────────────────────
+
+    /**
+     * Measures download throughput through the local SOCKS proxy.
+     *
+     * Tries [AppConfig.SPEED_TEST_DL_PRIMARY] first; if no data arrives within
+     * [AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS] ms, switches to
+     * [AppConfig.SPEED_TEST_DL_FALLBACK].
+     *
+     * Stops at whichever comes first:
+     *  - [AppConfig.SPEED_TEST_MAX_BYTES] transferred
+     *  - [AppConfig.SPEED_TEST_DURATION_MS] elapsed
+     *  - connection ends
+     */
+    fun testDownloadSpeed(): SpeedTestResult? {
         val socksPort = SettingsManager.getSocksPort()
         if (socksPort == 0) return null
 
         val proxyUsername = SettingsManager.getSocksUsername()
         val proxyPassword = SettingsManager.getSocksPassword()
-        val hasAuth = !proxyUsername.isNullOrBlank()
+        setupAuth(proxyUsername, proxyPassword)
 
-        if (hasAuth) {
-            Authenticator.setDefault(object : Authenticator() {
-                override fun getPasswordAuthentication(): PasswordAuthentication {
-                    return PasswordAuthentication(proxyUsername, (proxyPassword ?: "").toCharArray())
-                }
-            })
-        }
+        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
 
         try {
-            for (attempt in 1..MAX_ATTEMPTS) {
+            val urls = listOf(AppConfig.SPEED_TEST_DL_PRIMARY, AppConfig.SPEED_TEST_DL_FALLBACK)
+            for ((index, url) in urls.withIndex()) {
                 var conn: HttpURLConnection? = null
                 try {
-                    val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
-                    conn = (URL(AppConfig.SPEED_TEST_URL).openConnection(proxy) as HttpURLConnection).apply {
-                        connectTimeout = 6000
-                        readTimeout = timeoutMs
-                        requestMethod = "GET"
-                    }
-                    conn.connect()
+                    conn = openGetConnection(url, proxy) ?: continue
 
-                    if (conn.responseCode == 429) {
-                        LogUtil.e(AppConfig.TAG, "testDownloadSpeed http 429 (rate limited), attempt $attempt")
-                        if (attempt < MAX_ATTEMPTS) {
-                            conn.disconnect()
-                            Thread.sleep(RATE_LIMIT_RETRY_DELAY_MS)
-                            continue
-                        }
-                        return null
-                    }
-                    if (conn.responseCode !in 200..299) {
-                        LogUtil.e(AppConfig.TAG, "testDownloadSpeed http ${conn.responseCode}")
-                        return null
-                    }
+                    val buffer  = ByteArray(64 * 1024)
+                    var total   = 0L
+                    val start   = System.currentTimeMillis()
+                    var gotFirstByte = false
 
-                    val buffer = ByteArray(64 * 1024)
-                    var total = 0L
-                    val start = System.currentTimeMillis()
                     conn.inputStream.use { input ->
                         while (true) {
-                            if (System.currentTimeMillis() - start > timeoutMs) break
+                            val now = System.currentTimeMillis()
+                            val elapsed = now - start
+
+                            // Fallback trigger: no data in first 3 s → try next URL
+                            if (!gotFirstByte && elapsed >= AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS) {
+                                LogUtil.e(AppConfig.TAG, "DL primary timeout (no data in ${AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS}ms), switching to fallback")
+                                break
+                            }
+
+                            // Hard caps
+                            if (elapsed >= AppConfig.SPEED_TEST_DURATION_MS) break
+                            if (total >= AppConfig.SPEED_TEST_MAX_BYTES) break
+
                             val n = input.read(buffer)
                             if (n <= 0) break
                             total += n
+                            gotFirstByte = true
                         }
                     }
-                    val elapsed = System.currentTimeMillis() - start
-                    if (elapsed <= 0 || total <= 0) return null
 
+                    val elapsed = System.currentTimeMillis() - start
+                    if (!gotFirstByte) continue   // no data — try fallback
+
+                    if (elapsed <= 0 || total <= 0) return null
                     val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
                     return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
+
                 } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "testDownloadSpeed failed", e)
-                    return null
+                    LogUtil.e(AppConfig.TAG, "testDownloadSpeed[$index] failed: ${e.message}")
+                    if (index == urls.lastIndex) return null
                 } finally {
                     conn?.disconnect()
                 }
             }
             return null
         } finally {
-            if (hasAuth) Authenticator.setDefault(null)
+            if (!SettingsManager.getSocksUsername().isNullOrBlank()) Authenticator.setDefault(null)
         }
     }
 
+    // ── Upload ───────────────────────────────────────────────────────────────
+
     /**
-     * Measures upload throughput by streaming a fixed-size buffer of random bytes to
-     * [AppConfig.SPEED_TEST_UPLOAD_URL] through the local SOCKS inbound. Mirrors
-     * [testDownloadSpeed]: same proxy/auth handling and the same retry-on-429 behavior,
-     * since the exit IP can be shared and rate limited by the upstream test endpoint.
+     * Measures upload throughput through the local SOCKS proxy.
      *
-     * Requires the VPN/proxy service to already be running.
+     * Streams a repeating random buffer as a chunked POST body until
+     * [AppConfig.SPEED_TEST_MAX_BYTES] or [AppConfig.SPEED_TEST_DURATION_MS]
+     * is reached — whichever comes first.
      *
-     * @return the measured result, or null if not connected / on failure.
+     * Tries [AppConfig.SPEED_TEST_UL_PRIMARY] first; falls back to
+     * [AppConfig.SPEED_TEST_UL_FALLBACK] if no bytes are acknowledged within
+     * [AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS].
      */
-    fun testUploadSpeed(timeoutMs: Int = 20_000): SpeedTestResult? {
+    fun testUploadSpeed(): SpeedTestResult? {
         val socksPort = SettingsManager.getSocksPort()
         if (socksPort == 0) return null
 
         val proxyUsername = SettingsManager.getSocksUsername()
         val proxyPassword = SettingsManager.getSocksPassword()
-        val hasAuth = !proxyUsername.isNullOrBlank()
+        setupAuth(proxyUsername, proxyPassword)
 
-        if (hasAuth) {
-            Authenticator.setDefault(object : Authenticator() {
-                override fun getPasswordAuthentication(): PasswordAuthentication {
-                    return PasswordAuthentication(proxyUsername, (proxyPassword ?: "").toCharArray())
-                }
-            })
-        }
+        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
 
         try {
-            for (attempt in 1..MAX_ATTEMPTS) {
+            val urls = listOf(AppConfig.SPEED_TEST_UL_PRIMARY, AppConfig.SPEED_TEST_UL_FALLBACK)
+            for ((index, url) in urls.withIndex()) {
                 var conn: HttpURLConnection? = null
                 try {
-                    val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
-                    conn = (URL(AppConfig.SPEED_TEST_UPLOAD_URL).openConnection(proxy) as HttpURLConnection).apply {
-                        connectTimeout = 6000
-                        readTimeout = timeoutMs
-                        requestMethod = "POST"
-                        doOutput = true
-                        setFixedLengthStreamingMode(UPLOAD_TEST_BYTES)
+                    conn = (URL(url).openConnection(proxy) as HttpURLConnection).apply {
+                        connectTimeout = AppConfig.SPEED_TEST_TIMEOUT_MS
+                        readTimeout    = AppConfig.SPEED_TEST_TIMEOUT_MS
+                        requestMethod  = "POST"
+                        doOutput       = true
+                        // Chunked transfer — no fixed Content-Length, so no 8 MB pre-allocation
+                        setChunkedStreamingMode(64 * 1024)
                         setRequestProperty("Content-Type", "application/octet-stream")
                     }
                     conn.connect()
 
-                    val buffer = ByteArray(64 * 1024)
-                    Random.nextBytes(buffer)
-                    var total = 0L
-                    val start = System.currentTimeMillis()
-                    conn.outputStream.use { output ->
-                        while (total < UPLOAD_TEST_BYTES) {
-                            if (System.currentTimeMillis() - start > timeoutMs) break
-                            val chunk = (UPLOAD_TEST_BYTES - total).coerceAtMost(buffer.size.toLong()).toInt()
-                            output.write(buffer, 0, chunk)
-                            total += chunk
+                    val buffer = ByteArray(64 * 1024).also { Random.nextBytes(it) }
+                    var total   = 0L
+                    val start   = System.currentTimeMillis()
+                    var connected = false
+
+                    try {
+                        conn.outputStream.use { output ->
+                            while (true) {
+                                val now     = System.currentTimeMillis()
+                                val elapsed = now - start
+
+                                // Fallback trigger
+                                if (!connected && elapsed >= AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS) {
+                                    LogUtil.e(AppConfig.TAG, "UL primary timeout, switching to fallback")
+                                    break
+                                }
+                                if (elapsed >= AppConfig.SPEED_TEST_DURATION_MS) break
+                                if (total  >= AppConfig.SPEED_TEST_MAX_BYTES)    break
+
+                                val chunk = (AppConfig.SPEED_TEST_MAX_BYTES - total)
+                                    .coerceAtMost(buffer.size.toLong()).toInt()
+                                output.write(buffer, 0, chunk)
+                                output.flush()
+                                total    += chunk
+                                connected = true
+                            }
                         }
-                    }
+                    } catch (_: IOException) { /* server closed early — that's fine */ }
+
                     val elapsed = System.currentTimeMillis() - start
+                    if (!connected) continue   // nothing sent — try fallback
 
-                    if (conn.responseCode == 429) {
-                        LogUtil.e(AppConfig.TAG, "testUploadSpeed http 429 (rate limited), attempt $attempt")
-                        if (attempt < MAX_ATTEMPTS) {
-                            conn.disconnect()
-                            Thread.sleep(RATE_LIMIT_RETRY_DELAY_MS)
-                            continue
-                        }
-                        return null
-                    }
-                    if (conn.responseCode !in 200..299) {
-                        LogUtil.e(AppConfig.TAG, "testUploadSpeed http ${conn.responseCode}")
-                        return null
-                    }
                     if (elapsed <= 0 || total <= 0) return null
-
                     val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
                     return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
+
                 } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "testUploadSpeed failed", e)
-                    return null
+                    LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] failed: ${e.message}")
+                    if (index == urls.lastIndex) return null
                 } finally {
-                    conn?.disconnect()
+                    try { conn?.disconnect() } catch (_: Exception) {}
                 }
             }
             return null
         } finally {
-            if (hasAuth) Authenticator.setDefault(null)
+            if (!SettingsManager.getSocksUsername().isNullOrBlank()) Authenticator.setDefault(null)
         }
     }
 }

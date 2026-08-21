@@ -151,8 +151,21 @@ object AppConfig {
     const val TG_CHANNEL_URL = "https://t.me/github_2dust"
     const val DELAY_TEST_URL = "https://www.gstatic.com/generate_204"
     const val DELAY_TEST_URL2 = "https://www.google.com/generate_204"
-    const val SPEED_TEST_URL = "https://speed.cloudflare.com/__down?bytes=20000000"
-    const val SPEED_TEST_UPLOAD_URL = "https://speed.cloudflare.com/__up"
+    // Primary download test: Hetzner public speed-test file — no rate limit, reliable
+    const val SPEED_TEST_DL_PRIMARY   = "https://speed.hetzner.de/100MB.bin"
+    // Fallback download test: Cloudflare (used if primary fails or times out after 3 s)
+    const val SPEED_TEST_DL_FALLBACK  = "https://speed.cloudflare.com/__down"
+
+    // Primary upload test: httpbin echo — accepts any POST body, no rate limit
+    const val SPEED_TEST_UL_PRIMARY   = "https://httpbin.org/post"
+    // Fallback upload test: Cloudflare (used if primary fails or times out after 3 s)
+    const val SPEED_TEST_UL_FALLBACK  = "https://speed.cloudflare.com/__up"
+
+    /** Cap for both download and upload tests: stop at whichever comes first. */
+    const val SPEED_TEST_MAX_BYTES    = 20L * 1024 * 1024   // 20 MB
+    const val SPEED_TEST_DURATION_MS  = 15_000               // 15 s wall-clock cap
+    const val SPEED_TEST_TIMEOUT_MS   = 10_000               // 10 s connect/read timeout
+    const val SPEED_TEST_FALLBACK_TRIGGER_MS = 3_000         // switch to fallback after 3 s of no data
     const val OBSERVATORY_LEAST_PING_INTERVAL = "3m"
     const val OBSERVATORY_LEAST_LOAD_INTERVAL = "5m"
     const val OBSERVATORY_LEAST_LOAD_METHOD = "HEAD"
