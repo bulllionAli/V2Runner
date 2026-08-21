@@ -153,7 +153,10 @@ object AppConfig {
     const val DELAY_TEST_URL2 = "https://www.google.com/generate_204"
     // Primary download test: Hetzner public speed-test file — no rate limit, reliable
     const val SPEED_TEST_DL_PRIMARY   = "https://speed.hetzner.de/100MB.bin"
-    // Fallback download test: Cloudflare (used if primary fails or times out after 3 s)
+    // Fallback download test: Cloudflare (used if primary fails or times out after 3 s).
+    // NOTE: unlike Hetzner's static file, Cloudflare's endpoint requires a "?bytes=N" query
+    // param to actually return a body — without it, it returns little/no data and every
+    // fallback attempt fails. SpeedtestManager appends "?bytes=$SPEED_TEST_MAX_BYTES" to this.
     const val SPEED_TEST_DL_FALLBACK  = "https://speed.cloudflare.com/__down"
 
     // Primary upload test: httpbin echo — accepts any POST body, no rate limit
@@ -164,8 +167,14 @@ object AppConfig {
     /** Cap for both download and upload tests: stop at whichever comes first. */
     const val SPEED_TEST_MAX_BYTES    = 20L * 1024 * 1024   // 20 MB
     const val SPEED_TEST_DURATION_MS  = 15_000               // 15 s wall-clock cap
-    const val SPEED_TEST_TIMEOUT_MS   = 10_000               // 10 s connect/read timeout
-    const val SPEED_TEST_FALLBACK_TRIGGER_MS = 3_000         // switch to fallback after 3 s of no data
+    // Connect timeout is intentionally short: if the primary host is blocked/filtered, TCP/TLS
+    // connect() can otherwise hang for the full timeout *twice* (primary + fallback) before we
+    // even reach the "no data" fallback-trigger check below, which is what produced multi-second
+    // to 30+ second "Waiting..." states. Keep this in lockstep with SPEED_TEST_FALLBACK_TRIGGER_MS
+    // so "3 seconds with nothing happening" means the same thing at every stage of the test.
+    const val SPEED_TEST_CONNECT_TIMEOUT_MS  = 3_000          // 3 s connect timeout
+    const val SPEED_TEST_READ_TIMEOUT_MS     = 10_000         // 10 s read timeout (bounds stalls mid-transfer / the final ack wait)
+    const val SPEED_TEST_FALLBACK_TRIGGER_MS = 3_000          // switch to fallback after 3 s of no data
     const val OBSERVATORY_LEAST_PING_INTERVAL = "3m"
     const val OBSERVATORY_LEAST_LOAD_INTERVAL = "5m"
     const val OBSERVATORY_LEAST_LOAD_METHOD = "HEAD"

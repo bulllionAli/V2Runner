@@ -111,9 +111,14 @@ object SpeedtestManager {
     private fun openGetConnection(url: String, proxy: Proxy): HttpURLConnection? {
         return try {
             val conn = (URL(url).openConnection(proxy) as HttpURLConnection).apply {
-                connectTimeout = AppConfig.SPEED_TEST_TIMEOUT_MS
-                readTimeout    = AppConfig.SPEED_TEST_TIMEOUT_MS
+                connectTimeout = AppConfig.SPEED_TEST_CONNECT_TIMEOUT_MS
+                readTimeout    = AppConfig.SPEED_TEST_READ_TIMEOUT_MS
                 requestMethod  = "GET"
+                // Without this, HttpURLConnection's keep-alive pooling can silently keep
+                // draining/receiving the rest of the response body in the background after we
+                // stop reading (to make the socket reusable) — which is exactly why data kept
+                // moving after the test reported a result. "Connection: close" stops that.
+                setRequestProperty("Connection", "close")
             }
             conn.connect()
             if (conn.responseCode !in 200..299) {
@@ -152,7 +157,10 @@ object SpeedtestManager {
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
 
         try {
-            val urls = listOf(AppConfig.SPEED_TEST_DL_PRIMARY, AppConfig.SPEED_TEST_DL_FALLBACK)
+            val urls = listOf(
+                AppConfig.SPEED_TEST_DL_PRIMARY,
+                "${AppConfig.SPEED_TEST_DL_FALLBACK}?bytes=${AppConfig.SPEED_TEST_MAX_BYTES}"
+            )
             for ((index, url) in urls.withIndex()) {
                 var conn: HttpURLConnection? = null
                 try {
@@ -234,51 +242,81 @@ object SpeedtestManager {
                 var conn: HttpURLConnection? = null
                 try {
                     conn = (URL(url).openConnection(proxy) as HttpURLConnection).apply {
-                        connectTimeout = AppConfig.SPEED_TEST_TIMEOUT_MS
-                        readTimeout    = AppConfig.SPEED_TEST_TIMEOUT_MS
+                        connectTimeout = AppConfig.SPEED_TEST_CONNECT_TIMEOUT_MS
+                        readTimeout    = AppConfig.SPEED_TEST_READ_TIMEOUT_MS
                         requestMethod  = "POST"
                         doOutput       = true
                         // Chunked transfer — no fixed Content-Length, so no 8 MB pre-allocation
                         setChunkedStreamingMode(64 * 1024)
                         setRequestProperty("Content-Type", "application/octet-stream")
+                        // Disables connection reuse so nothing keeps pushing/draining bytes for
+                        // this socket once we're done with it (see openGetConnection() comment).
+                        setRequestProperty("Connection", "close")
                     }
                     conn.connect()
 
                     val buffer = ByteArray(64 * 1024).also { Random.nextBytes(it) }
-                    var total   = 0L
-                    val start   = System.currentTimeMillis()
+                    var total     = 0L
+                    val start     = System.currentTimeMillis()
                     var connected = false
+                    var stalled   = false
 
+                    val output = conn.outputStream
                     try {
-                        conn.outputStream.use { output ->
-                            while (true) {
-                                val now     = System.currentTimeMillis()
-                                val elapsed = now - start
+                        while (true) {
+                            val now     = System.currentTimeMillis()
+                            val elapsed = now - start
 
-                                // Fallback trigger
-                                if (!connected && elapsed >= AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS) {
-                                    LogUtil.e(AppConfig.TAG, "UL primary timeout, switching to fallback")
-                                    break
-                                }
-                                if (elapsed >= AppConfig.SPEED_TEST_DURATION_MS) break
-                                if (total  >= AppConfig.SPEED_TEST_MAX_BYTES)    break
-
-                                val chunk = (AppConfig.SPEED_TEST_MAX_BYTES - total)
-                                    .coerceAtMost(buffer.size.toLong()).toInt()
-                                output.write(buffer, 0, chunk)
-                                output.flush()
-                                total    += chunk
-                                connected = true
+                            // Fallback trigger: nothing accepted by the local socket in 3s
+                            if (!connected && elapsed >= AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS) {
+                                LogUtil.e(AppConfig.TAG, "UL primary stalled before first write, switching to fallback")
+                                stalled = true
+                                break
                             }
+                            if (elapsed >= AppConfig.SPEED_TEST_DURATION_MS) break
+                            if (total  >= AppConfig.SPEED_TEST_MAX_BYTES)    break
+
+                            val chunk = (AppConfig.SPEED_TEST_MAX_BYTES - total)
+                                .coerceAtMost(buffer.size.toLong()).toInt()
+                            output.write(buffer, 0, chunk)
+                            output.flush()
+                            total    += chunk
+                            connected = true
                         }
-                    } catch (_: IOException) { /* server closed early — that's fine */ }
 
-                    val elapsed = System.currentTimeMillis() - start
-                    if (!connected) continue   // nothing sent — try fallback
+                        // output.write()/flush() only prove the bytes reached the *local* socket
+                        // buffer, not that they crossed the link — that's why the reported speed
+                        // was higher than the real line speed. Closing the stream sends the final
+                        // chunk terminator, and reading the response code blocks until the server
+                        // has actually received the entire body and answered. Only at that point
+                        // is "total bytes in `elapsed` ms" a real, confirmed throughput figure.
+                        output.close()
 
-                    if (elapsed <= 0 || total <= 0) return null
-                    val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
-                    return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
+                        if (stalled || !connected) {
+                            if (index == urls.lastIndex) return null else continue
+                        }
+
+                        val responseCode = conn.responseCode
+                        val elapsed = System.currentTimeMillis() - start
+
+                        if (responseCode !in 200..299) {
+                            LogUtil.e(AppConfig.TAG, "UL $url ack → $responseCode")
+                            if (index == urls.lastIndex) return null else continue
+                        }
+                        if (elapsed <= 0 || total <= 0) {
+                            if (index == urls.lastIndex) return null else continue
+                        }
+
+                        val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
+                        return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
+
+                    } catch (e: IOException) {
+                        // Server closed early, or the ack never arrived within readTimeout — we
+                        // can't confirm real throughput, so this attempt is a failure rather than
+                        // a guess. Try the fallback URL instead of reporting a made-up number.
+                        LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] IO: ${e.message}")
+                        if (index == urls.lastIndex) return null
+                    }
 
                 } catch (e: Exception) {
                     LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] failed: ${e.message}")

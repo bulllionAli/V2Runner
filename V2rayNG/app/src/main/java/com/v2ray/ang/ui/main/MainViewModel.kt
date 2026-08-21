@@ -240,8 +240,19 @@ class MainViewModel(
             MainAction.DismissSpeedTestMenu -> dismissSpeedTestMenu()
             is MainAction.StartSpeedTest -> startSpeedTest(action.mode)
 
+            MainAction.TestCurrentServer -> {
+                // A tap on the bottom bar (short tap, not the speed-test long-press) always
+                // means "go back to the plain ping + IP display", even while a speed-test
+                // result is currently being shown. Clear the speed-test session/text here so
+                // the UI falls back to formatStatus(status); Activity still performs the
+                // actual ping test as before.
+                if (uiState.value.speedTestMode != null || uiState.value.speedTestResultText != null) {
+                    clearSpeedTestSession()
+                }
+                // Falls through — handled by Activity via its onAction lambda
+            }
+
             MainAction.ToggleService,
-            MainAction.TestCurrentServer,
             MainAction.ImportQRcode,
             MainAction.ImportClipboard,
             MainAction.ImportConfigLocal,
