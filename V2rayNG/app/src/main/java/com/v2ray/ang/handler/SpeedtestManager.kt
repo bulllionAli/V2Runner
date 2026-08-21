@@ -7,8 +7,10 @@ import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
 import java.io.IOException
+import java.net.Authenticator
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
+import java.net.PasswordAuthentication
 import java.net.Proxy
 import java.net.Socket
 import java.net.URL
@@ -103,11 +105,15 @@ object SpeedtestManager {
     }
 
     /**
-     * Downloads [AppConfig.SPEED_TEST_URL] (a fixed-size 20MB test file) through the
-     * local HTTP proxy (i.e. the currently running VPN connection) and measures the
+     * Downloads [AppConfig.SPEED_TEST_URL] (a fixed-size ~20MB test file) through the
+     * local SOCKS inbound (i.e. the currently running VPN connection) and measures the
      * effective throughput.
      *
-     * Requires the VPN/proxy service to already be running (uses [SettingsManager.getHttpPort]).
+     * Uses the SOCKS proxy (not HTTP) because the app's core only exposes a local HTTP
+     * inbound when running the v2fly core; with Xray core (the common case) only the
+     * SOCKS inbound is guaranteed to exist. See [SettingsManager.getSocksPort].
+     *
+     * Requires the VPN/proxy service to already be running.
      *
      * @param timeoutMs overall timeout for the transfer; the transfer is cut short at this
      *  point even if the full file hasn't downloaded yet, so speed is still computed from
@@ -115,26 +121,29 @@ object SpeedtestManager {
      * @return the measured result, or null if not connected / on failure.
      */
     fun testDownloadSpeed(timeoutMs: Int = 20_000): SpeedTestResult? {
-        val httpPort = SettingsManager.getHttpPort()
-        if (httpPort == 0) return null
+        val socksPort = SettingsManager.getSocksPort()
+        if (socksPort == 0) return null
 
         val proxyUsername = SettingsManager.getSocksUsername()
         val proxyPassword = SettingsManager.getSocksPassword()
+        val hasAuth = !proxyUsername.isNullOrBlank()
+
+        val previousAuthenticator = if (hasAuth) Authenticator.getDefault() else null
+        if (hasAuth) {
+            Authenticator.setDefault(object : Authenticator() {
+                override fun getPasswordAuthentication(): PasswordAuthentication {
+                    return PasswordAuthentication(proxyUsername, (proxyPassword ?: "").toCharArray())
+                }
+            })
+        }
 
         var conn: HttpURLConnection? = null
         return try {
-            val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", httpPort))
+            val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
             conn = (URL(AppConfig.SPEED_TEST_URL).openConnection(proxy) as HttpURLConnection).apply {
                 connectTimeout = 6000
                 readTimeout = timeoutMs
                 requestMethod = "GET"
-                if (!proxyUsername.isNullOrBlank()) {
-                    val basic = android.util.Base64.encodeToString(
-                        "$proxyUsername:$proxyPassword".toByteArray(),
-                        android.util.Base64.NO_WRAP
-                    )
-                    setRequestProperty("Proxy-Authorization", "Basic $basic")
-                }
             }
             conn.connect()
             if (conn.responseCode !in 200..299) {
@@ -163,6 +172,7 @@ object SpeedtestManager {
             null
         } finally {
             conn?.disconnect()
+            if (hasAuth) Authenticator.setDefault(previousAuthenticator)
         }
     }
 }
