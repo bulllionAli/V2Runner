@@ -346,6 +346,8 @@
     <string name="title_sub_update">🆕 Update Sub</string>
     <string name="title_ping_all_server">Test TCP delays (TCPing)</string>
     <string name="title_real_ping_all_server">🔎 Ping</string>
+    <string name="title_speed_test">Speed test</string>
+    <string name="speed_test_failed">Speed test failed</string>
     <string name="title_user_asset_setting">Asset files</string>
     <string name="title_sort_by_test_results">⏫ Sort By Ping</string>
     <string name="title_filter_config">Filter configs</string>

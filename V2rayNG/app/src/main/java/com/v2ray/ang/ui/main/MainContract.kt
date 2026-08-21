@@ -40,7 +40,9 @@ data class MainUiState(
     val showFixIpDialog: Boolean = false,
     val fixIpLoading: Boolean = false,
     val fixedIpConfigs: List<FixedIpConfig> = emptyList(),
-    val exitProxyConfig: FixedIpConfig? = null
+    val exitProxyConfig: FixedIpConfig? = null,
+    val isSpeedTesting: Boolean = false,
+    val speedTestResultText: String? = null,
 )
 
 /**
@@ -51,6 +53,7 @@ sealed interface MainAction {
     data object RefreshGroups : MainAction
     data object ToggleService : MainAction
     data object TestCurrentServer : MainAction
+    data object TestSpeed : MainAction
     data object TestAllServers : MainAction
     data object TestRealAllServers : MainAction
     data object CancelTesting : MainAction

@@ -227,6 +227,9 @@ fun MainScreen(
                     onMenuClick = { scope.launch { drawerState.open() } },
                     onAction = onAction,
                     exitProxyRemark = uiState.exitProxyConfig?.remark,
+                    isRunning = isRunning,
+                    isSpeedTesting = uiState.isSpeedTesting,
+                    speedTestResultText = uiState.speedTestResultText,
                     onMoreMenuAction = { action ->
                         when (action) {
                             MainMoreMenuAction.FixIp -> onAction(MainAction.OpenFixIpDialog)

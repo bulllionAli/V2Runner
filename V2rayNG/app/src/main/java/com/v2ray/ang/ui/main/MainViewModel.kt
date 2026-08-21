@@ -16,6 +16,7 @@ import com.v2ray.ang.dto.entities.SubscriptionCache
 import com.v2ray.ang.extension.isComplexType
 import com.v2ray.ang.extension.matchesPattern
 import com.v2ray.ang.extension.moveItem
+import com.v2ray.ang.handler.SpeedtestManager
 import com.v2ray.ang.ui.base.BaseViewModel
 import com.v2ray.ang.util.LogUtil
 import kotlinx.coroutines.CancellationException
@@ -208,6 +209,7 @@ class MainViewModel(
 
             MainAction.ToggleService,
             MainAction.TestCurrentServer,
+            MainAction.TestSpeed,
             MainAction.ImportQRcode,
             MainAction.ImportClipboard,
             MainAction.ImportConfigLocal,
@@ -777,6 +779,27 @@ class MainViewModel(
     fun testCurrentServerRealPing() {
         _uiState.update { it.copy(status = MainStatus.Testing) }
         dataSource.testCurrentServerRealPing()
+    }
+
+    fun testCurrentServerSpeed() {
+        if (!uiState.value.isRunning) {
+            toast(R.string.toast_action_not_allowed)
+            return
+        }
+        if (uiState.value.isSpeedTesting) return
+        _uiState.update { it.copy(isSpeedTesting = true, speedTestResultText = null) }
+        viewModelScope.launch(ioDispatcher) {
+            val result = SpeedtestManager.testDownloadSpeed()
+            withContext(Dispatchers.Main) {
+                _uiState.update {
+                    it.copy(
+                        isSpeedTesting = false,
+                        speedTestResultText = result?.let { r -> "↓ %.1f Mbps".format(r.mbps) }
+                    )
+                }
+                if (result == null) toast(R.string.speed_test_failed)
+            }
+        }
     }
 
     private fun onTestsFinished() {

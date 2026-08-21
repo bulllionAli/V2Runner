@@ -7,8 +7,11 @@ import com.v2ray.ang.util.HttpUtil
 import com.v2ray.ang.util.JsonUtil
 import com.v2ray.ang.util.LogUtil
 import java.io.IOException
+import java.net.HttpURLConnection
 import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.Socket
+import java.net.URL
 import java.net.UnknownHostException
 
 object SpeedtestManager {
@@ -16,6 +19,13 @@ object SpeedtestManager {
     data class RemoteEndpointInfo(
         val country: String?,
         val ipAddress: String?,
+    )
+
+    /** Result of a download speed test. */
+    data class SpeedTestResult(
+        val mbps: Double,
+        val bytesTransferred: Long,
+        val elapsedMs: Long,
     )
 
     /**
@@ -90,5 +100,69 @@ object SpeedtestManager {
             country = country,
             ipAddress = ip,
         )
+    }
+
+    /**
+     * Downloads [AppConfig.SPEED_TEST_URL] (a fixed-size 20MB test file) through the
+     * local HTTP proxy (i.e. the currently running VPN connection) and measures the
+     * effective throughput.
+     *
+     * Requires the VPN/proxy service to already be running (uses [SettingsManager.getHttpPort]).
+     *
+     * @param timeoutMs overall timeout for the transfer; the transfer is cut short at this
+     *  point even if the full file hasn't downloaded yet, so speed is still computed from
+     *  whatever was actually transferred.
+     * @return the measured result, or null if not connected / on failure.
+     */
+    fun testDownloadSpeed(timeoutMs: Int = 20_000): SpeedTestResult? {
+        val httpPort = SettingsManager.getHttpPort()
+        if (httpPort == 0) return null
+
+        val proxyUsername = SettingsManager.getSocksUsername()
+        val proxyPassword = SettingsManager.getSocksPassword()
+
+        var conn: HttpURLConnection? = null
+        return try {
+            val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", httpPort))
+            conn = (URL(AppConfig.SPEED_TEST_URL).openConnection(proxy) as HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = timeoutMs
+                requestMethod = "GET"
+                if (!proxyUsername.isNullOrBlank()) {
+                    val basic = android.util.Base64.encodeToString(
+                        "$proxyUsername:$proxyPassword".toByteArray(),
+                        android.util.Base64.NO_WRAP
+                    )
+                    setRequestProperty("Proxy-Authorization", "Basic $basic")
+                }
+            }
+            conn.connect()
+            if (conn.responseCode !in 200..299) {
+                LogUtil.e(AppConfig.TAG, "testDownloadSpeed http ${conn.responseCode}")
+                return null
+            }
+
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
+            val start = System.currentTimeMillis()
+            conn.inputStream.use { input ->
+                while (true) {
+                    if (System.currentTimeMillis() - start > timeoutMs) break
+                    val n = input.read(buffer)
+                    if (n <= 0) break
+                    total += n
+                }
+            }
+            val elapsed = System.currentTimeMillis() - start
+            if (elapsed <= 0 || total <= 0) return null
+
+            val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
+            SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
+        } catch (e: Exception) {
+            LogUtil.e(AppConfig.TAG, "testDownloadSpeed failed", e)
+            null
+        } finally {
+            conn?.disconnect()
+        }
     }
 }
