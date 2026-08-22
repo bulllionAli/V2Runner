@@ -166,7 +166,7 @@ object SpeedtestManager {
      *  - [AppConfig.SPEED_TEST_DURATION_MS] elapsed
      *  - connection ends
      */
-    fun testDownloadSpeed(onProgress: ((Double) -> Unit)? = null): SpeedTestResult? {
+    fun testDownloadSpeed(onProgress: ((Double) -> Unit)? = null, onConnected: (() -> Unit)? = null): SpeedTestResult? {
         val socksPort = SettingsManager.getSocksPort()
         if (socksPort == 0) return null
 
@@ -175,6 +175,12 @@ object SpeedtestManager {
         setupAuth(proxyUsername, proxyPassword)
 
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
+
+        // Fires onConnected exactly once, the moment real data starts flowing — no matter which
+        // of the fallback URLs ends up being the one that works. Until this fires, the caller is
+        // still in the "trying to reach a server" phase (UI: "Connecting..."); after it fires,
+        // bytes are actually moving (UI: "Downloading...").
+        var reportedConnected = false
 
         try {
             // Tier 1: Hetzner (reliable, but a shared exit IP can trip its abuse/rate limiting).
@@ -220,6 +226,10 @@ object SpeedtestManager {
                             if (n <= 0) break
                             total += n
                             gotFirstByte = true
+                            if (!reportedConnected) {
+                                reportedConnected = true
+                                onConnected?.invoke()
+                            }
 
                             // Live running-average mbps, throttled so we don't flood the UI.
                             if (onProgress != null && elapsed > 0 &&
@@ -268,7 +278,7 @@ object SpeedtestManager {
      * [AppConfig.SPEED_TEST_UPLOAD_HARD_DEADLINE_MS], so this can never sit on
      * "Waiting..." forever regardless of what the server does.
      */
-    fun testUploadSpeed(onProgress: ((Double) -> Unit)? = null): SpeedTestResult? {
+    fun testUploadSpeed(onProgress: ((Double) -> Unit)? = null, onConnected: (() -> Unit)? = null): SpeedTestResult? {
         val socksPort = SettingsManager.getSocksPort()
         if (socksPort == 0) return null
 
@@ -277,6 +287,11 @@ object SpeedtestManager {
         setupAuth(proxyUsername, proxyPassword)
 
         val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort))
+
+        // Same one-shot signal as testDownloadSpeed: fires the moment the first chunk is
+        // actually accepted by the socket (real upload started), regardless of which fallback
+        // URL ends up succeeding.
+        var reportedConnected = false
 
         try {
             // Tier 1: Cloudflare. Tier 2+: self-hosted "Speedtest Mini" mirrors known reachable
@@ -351,6 +366,10 @@ object SpeedtestManager {
                             output.flush()
                             total    += chunk
                             connected = true
+                            if (!reportedConnected) {
+                                reportedConnected = true
+                                onConnected?.invoke()
+                            }
 
                             // Live running-average mbps, throttled so we don't flood the UI.
                             if (onProgress != null && elapsed > 0 &&

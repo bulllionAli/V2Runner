@@ -842,20 +842,29 @@ class MainViewModel(
     /**
      * Builds the exact result line format:
      * "Ping: 110    DL: 7.5    UP: 2.2     [GB] 141.98.101.181"
-     * Only present fields are included; IP block is always last.
+     * Ping + IP are always present (when available); DL/UP are added to the line as each leg
+     * finishes. A leg that was attempted but never produced a number (both its primary and
+     * fallback URLs failed) shows as a dash — e.g. "UP: -" — rather than being silently
+     * omitted, so the user can tell "didn't run" apart from "ran and failed".
+     * [statusText] is the current in-progress phase label ("Connecting...", "Downloading...",
+     * "Uploading...") and is only shown while a leg is still running.
      */
     private fun buildResultText(
         pingMs: Long,
         ipLabel: String?,
         dlMbps: Float? = null,
+        dlFailed: Boolean = false,
         upMbps: Float? = null,
-        waiting: Boolean = false,
+        upFailed: Boolean = false,
+        statusText: String? = null,
     ): String {
         val sb = StringBuilder()
         sb.append("Ping: $pingMs")
         if (dlMbps != null) sb.append("    DL: ${"%.1f".format(dlMbps)}")
+        else if (dlFailed)  sb.append("    DL: -")
         if (upMbps != null) sb.append("    UP: ${"%.1f".format(upMbps)}")
-        if (waiting)        sb.append("    ${dataSource.getString(R.string.speed_test_waiting)}")
+        else if (upFailed)  sb.append("    UP: -")
+        if (statusText != null) sb.append("    $statusText")
         if (ipLabel != null) sb.append("     $ipLabel")
         return sb.toString()
     }
@@ -888,13 +897,13 @@ class MainViewModel(
                 showSpeedTestMenu = false,
                 speedTestMode = mode,
                 isSpeedTesting = true,
-                speedTestResultText = dataSource.getString(R.string.speed_test_waiting)
+                speedTestResultText = dataSource.getString(R.string.speed_test_connecting)
             )
         }
 
         if (cachedPing != null) {
             // Already have a recent ping — skip the extra ping call
-            val initialText = buildResultText(cachedPing, cachedIp, waiting = true)
+            val initialText = buildResultText(cachedPing, cachedIp, statusText = dataSource.getString(R.string.speed_test_connecting))
             _uiState.update { it.copy(speedTestResultText = initialText) }
             runSpeedTestPhases(mode, cachedPing, cachedIp)
         } else {
@@ -914,7 +923,7 @@ class MainViewModel(
         }
         val ipLabel = buildIpLabel(result)
         _uiState.update { it.copy(lastPingMs = result.delayMillis, lastIpLabel = ipLabel) }
-        val initialText = buildResultText(result.delayMillis, ipLabel, waiting = true)
+        val initialText = buildResultText(result.delayMillis, ipLabel, statusText = dataSource.getString(R.string.speed_test_connecting))
         _uiState.update { it.copy(speedTestResultText = initialText) }
         runSpeedTestPhases(mode, result.delayMillis, ipLabel)
     }
@@ -922,25 +931,73 @@ class MainViewModel(
     private fun runSpeedTestPhases(mode: SpeedTestMode, pingMs: Long, ipLabel: String?) {
         speedTestJob = viewModelScope.launch(ioDispatcher) {
             var dlMbps: Float? = null
+            var dlFailed = false
             var upMbps: Float? = null
+            var upFailed = false
+
+            // MutableStateFlow.update {} is atomic/thread-safe from any thread, so the
+            // onConnected callbacks below (invoked synchronously from deep inside
+            // SpeedtestManager's blocking network call, still on ioDispatcher) can push straight
+            // to _uiState without hopping to Main — same as the withContext(Dispatchers.Main)
+            // updates elsewhere in this function, just without needing a suspend context.
+            val connectingText = dataSource.getString(R.string.speed_test_connecting)
+            val downloadingText = dataSource.getString(R.string.speed_test_downloading)
+            val uploadingText = dataSource.getString(R.string.speed_test_uploading)
 
             if (mode == SpeedTestMode.DOWNLOAD || mode == SpeedTestMode.BOTH) {
-                val result = SpeedtestManager.testDownloadSpeed()
+                // Phase: reaching out to the download test server(s)
+                withContext(Dispatchers.Main) {
+                    _uiState.update { state ->
+                        if (state.speedTestMode != mode) return@update state
+                        state.copy(speedTestResultText = buildResultText(pingMs, ipLabel, statusText = connectingText))
+                    }
+                }
+
+                val result = SpeedtestManager.testDownloadSpeed(
+                    onConnected = {
+                        // Phase: connected, bytes are actually flowing now
+                        _uiState.update { state ->
+                            if (state.speedTestMode != mode) return@update state
+                            state.copy(speedTestResultText = buildResultText(pingMs, ipLabel, statusText = downloadingText))
+                        }
+                    }
+                )
                 dlMbps = result?.mbps?.toFloat()
+                dlFailed = result == null
 
                 if (mode == SpeedTestMode.BOTH) {
+                    // DL result lands in the line, and we move straight into the upload
+                    // "connecting" phase.
                     withContext(Dispatchers.Main) {
                         _uiState.update { state ->
                             if (state.speedTestMode != mode) return@update state
-                            state.copy(speedTestResultText = buildResultText(pingMs, ipLabel, dlMbps, waiting = true))
+                            state.copy(speedTestResultText = buildResultText(pingMs, ipLabel, dlMbps, dlFailed, statusText = connectingText))
                         }
                     }
                 }
             }
 
             if (mode == SpeedTestMode.UPLOAD || mode == SpeedTestMode.BOTH) {
-                val result = SpeedtestManager.testUploadSpeed()
+                if (mode == SpeedTestMode.UPLOAD) {
+                    // Upload-only run — the DOWNLOAD branch above didn't already show this.
+                    withContext(Dispatchers.Main) {
+                        _uiState.update { state ->
+                            if (state.speedTestMode != mode) return@update state
+                            state.copy(speedTestResultText = buildResultText(pingMs, ipLabel, statusText = connectingText))
+                        }
+                    }
+                }
+
+                val result = SpeedtestManager.testUploadSpeed(
+                    onConnected = {
+                        _uiState.update { state ->
+                            if (state.speedTestMode != mode) return@update state
+                            state.copy(speedTestResultText = buildResultText(pingMs, ipLabel, dlMbps, dlFailed, statusText = uploadingText))
+                        }
+                    }
+                )
                 upMbps = result?.mbps?.toFloat()
+                upFailed = result == null
             }
 
             withContext(Dispatchers.Main) {
@@ -949,7 +1006,7 @@ class MainViewModel(
                     val text = if (dlMbps == null && upMbps == null) {
                         dataSource.getString(R.string.speed_test_failed)
                     } else {
-                        buildResultText(pingMs, ipLabel, dlMbps, upMbps)
+                        buildResultText(pingMs, ipLabel, dlMbps, dlFailed, upMbps, upFailed)
                     }
                     state.copy(isSpeedTesting = false, speedTestResultText = text)
                 }

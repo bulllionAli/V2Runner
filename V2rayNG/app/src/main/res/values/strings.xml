@@ -351,7 +351,9 @@
     <string name="speed_test_menu_upload">Upload Speed</string>
     <string name="speed_test_menu_download">Download Speed</string>
     <string name="speed_test_menu_both">Both</string>
-    <string name="speed_test_waiting">Waiting...</string>
+    <string name="speed_test_connecting">Connecting...</string>
+    <string name="speed_test_downloading">Downloading...</string>
+    <string name="speed_test_uploading">Uploading...</string>
 
     <string name="title_user_asset_setting">Asset files</string>
     <string name="title_sort_by_test_results">⏫ Sort By Ping</string>
