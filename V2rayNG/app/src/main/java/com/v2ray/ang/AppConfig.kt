@@ -164,7 +164,7 @@ object AppConfig {
     // (httpbin.org/post, postman-echo.com/post, etc.) which mirror the entire request body back
     // in their response. For a 20 MB upload, an echo endpoint means waiting for another ~20+ MB
     // to come back down before we can confirm the upload finished — that's what was causing the
-    // test to sit on "Waiting..." indefinitely. Cloudflare's endpoint has no such problem.
+    // test to sit stuck indefinitely with no ack ever arriving. Cloudflare's endpoint has no such problem.
     const val SPEED_TEST_UL_PRIMARY   = "https://speed.cloudflare.com/__up"
     // Real fallback (was a no-op duplicate of PRIMARY before): a public Ookla "Speedtest Mini"
     // instance found by sniffing which hosts Throne actually reaches from this network
@@ -175,9 +175,11 @@ object AppConfig {
 
     // Self-hosted Ookla "Speedtest Mini" mirrors (the same open-source server package the
     // official Ookla apps use when a user runs their own node). Discovered from a sing-box log
-    // of Throne connecting from this exact network — since they already proved reachable here,
-    // they're a good extra fallback tier when Hetzner/Cloudflare get rate-limited ("limited"
-    // responses) or blocked outright. All speak the same HTTP protocol on port 8080:
+    // of Throne connecting from this exact network.
+    // NOTE: no longer wired into SpeedtestManager's fallback chain — download/upload now cap
+    // "Connecting..." at exactly 2 attempts (primary + one fallback, 3 s each) so the state can
+    // never sit on screen more than ~6 s. Left here in case a shorter tier-3 chain is wanted
+    // later. All speak the same HTTP protocol on port 8080:
     //   download: GET  {host}/speedtest/random4000x4000.jpg   (~4.5 MB image, fetched repeatedly)
     //   upload:   POST {host}/speedtest/upload.php             (raw body, discarded; tiny reply)
     // NOTE: plain HTTP, not HTTPS — these mini installs don't all terminate TLS on 8080.
@@ -208,11 +210,11 @@ object AppConfig {
 
     /** Cap for both download and upload tests: stop at whichever comes first. */
     const val SPEED_TEST_MAX_BYTES    = 20L * 1024 * 1024   // 20 MB
-    const val SPEED_TEST_DURATION_MS  = 15_000               // 15 s wall-clock cap
+    const val SPEED_TEST_DURATION_MS  = 12_000               // 12 s wall-clock cap
     // Connect timeout is intentionally short: if the primary host is blocked/filtered, TCP/TLS
     // connect() can otherwise hang for the full timeout *twice* (primary + fallback) before we
     // even reach the "no data" fallback-trigger check below, which is what produced multi-second
-    // to 30+ second "Waiting..." states. Keep this in lockstep with SPEED_TEST_FALLBACK_TRIGGER_MS
+    // to 30+ second stuck states. Keep this in lockstep with SPEED_TEST_FALLBACK_TRIGGER_MS
     // so "3 seconds with nothing happening" means the same thing at every stage of the test.
     const val SPEED_TEST_CONNECT_TIMEOUT_MS  = 3_000          // 3 s connect timeout
     // Raised from 10s → 20s: this bounds conn.responseCode's wait for the server's ack after
@@ -221,25 +223,32 @@ object AppConfig {
     // more time to show up than on a fast connection.
     const val SPEED_TEST_READ_TIMEOUT_MS     = 20_000         // 20 s read timeout (bounds stalls mid-transfer / the final ack wait)
     const val SPEED_TEST_FALLBACK_TRIGGER_MS = 3_000          // switch to fallback after 3 s of no data
-    // Upload-only, and deliberately much more generous than SPEED_TEST_FALLBACK_TRIGGER_MS above:
-    // by the time this check runs, conn.connect() has already succeeded, so the server is
-    // definitely reachable — the only thing this guards against is a server that accepts the TCP/
-    // TLS handshake but never actually reads the body. A slow (but working) uplink can easily take
-    // several seconds just to push the first 64 KB chunk out, and that's not the same failure —
-    // this used to share the 3 s threshold above, which is exactly why uploads looked "completely
-    // broken" on a ~0.5 Mbps Wi-Fi connection while working fine on fast networks.
-    const val SPEED_TEST_UPLOAD_STALL_TRIGGER_MS = 8_000L
-    // How often testDownloadSpeed/testUploadSpeed report a live running-average mbps back to the
-    // UI via their onProgress callback. Small enough to feel real-time, large enough not to spam
-    // the StateFlow with updates on every 64 KB chunk.
-    const val SPEED_TEST_PROGRESS_INTERVAL_MS = 200L
+    // Upload-only "Connecting..." ceiling — kept in lockstep with SPEED_TEST_FALLBACK_TRIGGER_MS
+    // above so "3 s with nothing happening" means the same thing at every connecting stage, for
+    // both legs: 3 s for the first server, then 3 s for the fallback.
+    // Previously 8 s, to tolerate a slow-but-working uplink taking a while to push its first
+    // 64 KB chunk out. That edge case is now covered on its own terms by
+    // SPEED_TEST_MIN_UPLOAD_MBPS below instead: a link that can't clear 64 KB in 3 s is already
+    // under the 0.5 Mbps floor, so it should fail either way — no need for a separate, longer
+    // grace period here anymore.
+    const val SPEED_TEST_UPLOAD_STALL_TRIGGER_MS = 3_000L
+    // Sustained minimum-speed floor for the *transfer* phase (Downloading.../Uploading...),
+    // as opposed to the connect-phase stall triggers above (which only catch a dead link).
+    // Checked once, at this single checkpoint after real bytes start moving: if throughput over
+    // this window is under the matching floor, the leg is aborted outright — no further URL
+    // fallback — and reported as a dash. "Downloading.../Uploading..." should only ever be shown
+    // on screen while a real, useful transfer is actually happening.
+    const val SPEED_TEST_MIN_SPEED_CHECK_MS = 3_000L
+    const val SPEED_TEST_MIN_DOWNLOAD_MBPS  = 1.0
+    const val SPEED_TEST_MIN_UPLOAD_MBPS    = 0.5
     const val OBSERVATORY_LEAST_PING_INTERVAL = "3m"
     const val OBSERVATORY_LEAST_LOAD_INTERVAL = "5m"
     const val OBSERVATORY_LEAST_LOAD_METHOD = "HEAD"
     const val OBSERVATORY_LEAST_LOAD_SAMPLING = "2"
     const val OBSERVATORY_LEAST_LOAD_TIMEOUT = "30s"
 
-    //    const val IP_API_URL = "https://speed.cloudflare.com/meta"
+    // Previously "https://speed.cloudflare.com/meta" — switched to ip.sb, which returns a
+    // more consistently-shaped JSON response (ip/country fields) across regions.
     const val IP_API_URL = "https://api.ip.sb/geoip"
 
     /** DNS server addresses. */
@@ -309,7 +318,7 @@ object AppConfig {
     const val HY2 = "hy2://"
     const val V2RAYNFMTS = "v2rayn://"
 
-    /** Give a good name to this, IDK*/
+    /** Identifies VPN mode; used as the mode tag when the proxy type is VPN. */
     const val VPN = "VPN"
     const val VPN_MTU = 1500
 

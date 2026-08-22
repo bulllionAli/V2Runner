@@ -39,7 +39,7 @@ import com.v2ray.ang.ui.compose.colorFabInactiveLight
 import kotlinx.coroutines.launch
 
 /** How long the bottom bar must be held down before the speed test menu opens. */
-private const val SPEED_TEST_MENU_HOLD_MS = 2000L
+private const val SPEED_TEST_MENU_HOLD_MS = 1000L
 
 @Composable
 fun MainBottomBar(

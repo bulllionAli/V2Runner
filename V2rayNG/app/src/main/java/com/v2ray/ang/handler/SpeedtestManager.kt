@@ -43,11 +43,11 @@ object SpeedtestManager {
         val ipAddress: String?,
     )
 
-    /** Result of a speed test leg (download or upload). */
+    /** Result of a speed test leg (download or upload). Only mbps is actually consumed by
+     * callers today — this used to also carry bytesTransferred/elapsedMs, but nothing read
+     * them, so they were dropped to keep this to what's actually used. */
     data class SpeedTestResult(
         val mbps: Double,
-        val bytesTransferred: Long,
-        val elapsedMs: Long,
     )
 
     /**
@@ -75,6 +75,13 @@ object SpeedtestManager {
         }
     }
 
+    /**
+     * Fetches the exit IP address and country code as seen by the remote server, by requesting
+     * [AppConfig.IP_API_URL] (or the user-configured [AppConfig.PREF_IP_API_URL] override)
+     * through the local HTTP proxy — so the result reflects the active VPN config's exit, not
+     * the device's real network. Returns null if the local proxy isn't up or the response can't
+     * be parsed into a known IP-info JSON shape.
+     */
     fun getRemoteIPInfo(): RemoteEndpointInfo? {
         val url = MmkvManager.decodeSettingsString(AppConfig.PREF_IP_API_URL)
             .takeIf { !it.isNullOrBlank() } ?: AppConfig.IP_API_URL
@@ -161,12 +168,17 @@ object SpeedtestManager {
      * [AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS] ms, switches to
      * [AppConfig.SPEED_TEST_DL_FALLBACK].
      *
-     * Stops at whichever comes first:
+     * Once data starts flowing, throughput is checked once against
+     * [AppConfig.SPEED_TEST_MIN_DOWNLOAD_MBPS] after [AppConfig.SPEED_TEST_MIN_SPEED_CHECK_MS] —
+     * if it's under the floor, the whole test aborts immediately and returns null (no further
+     * URL fallback), since that's a real answer ("too slow"), not a dead link.
+     *
+     * Otherwise stops at whichever comes first:
      *  - [AppConfig.SPEED_TEST_MAX_BYTES] transferred
      *  - [AppConfig.SPEED_TEST_DURATION_MS] elapsed
      *  - connection ends
      */
-    fun testDownloadSpeed(onProgress: ((Double) -> Unit)? = null, onConnected: (() -> Unit)? = null): SpeedTestResult? {
+    fun testDownloadSpeed(onConnected: (() -> Unit)? = null): SpeedTestResult? {
         val socksPort = SettingsManager.getSocksPort()
         if (socksPort == 0) return null
 
@@ -183,17 +195,21 @@ object SpeedtestManager {
         var reportedConnected = false
 
         try {
-            // Tier 1: Hetzner (reliable, but a shared exit IP can trip its abuse/rate limiting).
-            // Tier 2: Cloudflare.
-            // Tier 3: self-hosted "Speedtest Mini" mirrors known reachable from this network
-            // (see AppConfig.SPEED_TEST_MINI_SERVERS) — a different provider/network path, so a
-            // block or rate-limit hitting tiers 1-2 usually doesn't hit these too.
+            // Exactly two attempts for "Connecting...": Hetzner first, then Cloudflare as the
+            // one fallback — each gets AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS (3 s) before
+            // moving on. If both fail to produce data, the leg stops immediately and reports a
+            // dash, so "Connecting..." can never sit on screen for more than ~6 s total. (No
+            // further mini-server tiers — that cascade used to let this run far longer.)
             val urls = listOf(
                 AppConfig.SPEED_TEST_DL_PRIMARY,
                 "${AppConfig.SPEED_TEST_DL_FALLBACK}?bytes=${AppConfig.SPEED_TEST_MAX_BYTES}"
-            ) + AppConfig.SPEED_TEST_MINI_SERVERS.map { "http://$it${AppConfig.SPEED_TEST_MINI_DL_PATH}" }
+            )
             for ((index, url) in urls.withIndex()) {
                 var conn: HttpURLConnection? = null
+                // Captured BEFORE opening the connection so the "Connecting..." budget below
+                // covers the *whole* attempt (TCP/TLS connect + wait for first byte), not 3 s of
+                // connect on top of a separate 3 s wait for data — each server gets ~3 s all-in.
+                val attemptStart = System.currentTimeMillis()
                 try {
                     conn = openGetConnection(url, proxy)
                     if (conn == null) {
@@ -205,16 +221,20 @@ object SpeedtestManager {
                     var total   = 0L
                     val start   = System.currentTimeMillis()
                     var gotFirstByte = false
-                    var lastReportMs = start
+                    var downloadPhaseStart = -1L
+                    var minSpeedChecked = false
+                    var tooSlow = false
 
                     conn.inputStream.use { input ->
                         while (true) {
                             val now = System.currentTimeMillis()
                             val elapsed = now - start
 
-                            // Fallback trigger: no data in first 3 s → try next URL
-                            if (!gotFirstByte && elapsed >= AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS) {
-                                LogUtil.e(AppConfig.TAG, "DL primary timeout (no data in ${AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS}ms), switching to fallback")
+                            // Fallback trigger: measured from attemptStart (before connect), not
+                            // from start (after connect) — so the whole "Connecting..." attempt
+                            // for this server is capped at 3 s total, not 3 s connect + 3 s more.
+                            if (!gotFirstByte && (now - attemptStart) >= AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS) {
+                                LogUtil.e(AppConfig.TAG, "DL primary timeout (no data in ${AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS}ms of attempt), switching to fallback")
                                 break
                             }
 
@@ -222,23 +242,45 @@ object SpeedtestManager {
                             if (elapsed >= AppConfig.SPEED_TEST_DURATION_MS) break
                             if (total >= AppConfig.SPEED_TEST_MAX_BYTES) break
 
+                            // Sustained minimum-speed watchdog: once real data has started flowing
+                            // (UI is showing "Downloading..."), throughput measured over the first
+                            // SPEED_TEST_MIN_SPEED_CHECK_MS of that phase must clear
+                            // SPEED_TEST_MIN_DOWNLOAD_MBPS. Checked once, at that single checkpoint
+                            // — distinct from the stall check above, which only catches a dead link.
+                            // A link that connects but trickles below the floor is a real (if
+                            // useless) result, so this aborts the whole test outright rather than
+                            // falling through to another URL.
+                            if (gotFirstByte && !minSpeedChecked) {
+                                val sinceStart = now - downloadPhaseStart
+                                if (sinceStart >= AppConfig.SPEED_TEST_MIN_SPEED_CHECK_MS) {
+                                    minSpeedChecked = true
+                                    val currentMbps = (total * 8.0 / (sinceStart / 1000.0)) / 1_000_000.0
+                                    if (currentMbps < AppConfig.SPEED_TEST_MIN_DOWNLOAD_MBPS) {
+                                        LogUtil.e(AppConfig.TAG, "testDownloadSpeed[$index] $url → below ${AppConfig.SPEED_TEST_MIN_DOWNLOAD_MBPS} Mbps floor (${"%.2f".format(currentMbps)} Mbps after ${sinceStart}ms), aborting")
+                                        tooSlow = true
+                                        break
+                                    }
+                                }
+                            }
+
                             val n = input.read(buffer)
                             if (n <= 0) break
                             total += n
-                            gotFirstByte = true
+                            if (!gotFirstByte) {
+                                gotFirstByte = true
+                                downloadPhaseStart = now
+                            }
                             if (!reportedConnected) {
                                 reportedConnected = true
                                 onConnected?.invoke()
                             }
-
-                            // Live running-average mbps, throttled so we don't flood the UI.
-                            if (onProgress != null && elapsed > 0 &&
-                                now - lastReportMs >= AppConfig.SPEED_TEST_PROGRESS_INTERVAL_MS
-                            ) {
-                                onProgress((total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0)
-                                lastReportMs = now
-                            }
                         }
+                    }
+
+                    if (tooSlow) {
+                        // Hard stop: a genuinely too-slow link is a final result (dash), not a
+                        // reason to try another URL. The finally{} below disconnects immediately.
+                        return null
                     }
 
                     val elapsed = System.currentTimeMillis() - start
@@ -250,7 +292,7 @@ object SpeedtestManager {
                     if (elapsed <= 0 || total <= 0) return null
                     val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
                     LogUtil.e(AppConfig.TAG, "testDownloadSpeed[$index] $url → OK: ${"%.1f".format(mbps)} Mbps ($total bytes / ${elapsed}ms)")
-                    return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
+                    return SpeedTestResult(mbps = mbps)
 
                 } catch (e: Exception) {
                     LogUtil.e(AppConfig.TAG, "testDownloadSpeed[$index] $url failed: ${e.javaClass.simpleName}: ${e.message}")
@@ -276,9 +318,14 @@ object SpeedtestManager {
      * is reached — whichever comes first. A watchdog guarantees the whole attempt
      * (connect + write + wait-for-ack) can never exceed
      * [AppConfig.SPEED_TEST_UPLOAD_HARD_DEADLINE_MS], so this can never sit on
-     * "Waiting..." forever regardless of what the server does.
+     * stuck forever regardless of what the server does.
+     *
+     * Once bytes start being accepted, throughput is checked once against
+     * [AppConfig.SPEED_TEST_MIN_UPLOAD_MBPS] after [AppConfig.SPEED_TEST_MIN_SPEED_CHECK_MS] —
+     * if it's under the floor, the whole test aborts immediately and returns null (no further
+     * URL fallback), since that's a real answer ("too slow"), not a dead link.
      */
-    fun testUploadSpeed(onProgress: ((Double) -> Unit)? = null, onConnected: (() -> Unit)? = null): SpeedTestResult? {
+    fun testUploadSpeed(onConnected: (() -> Unit)? = null): SpeedTestResult? {
         val socksPort = SettingsManager.getSocksPort()
         if (socksPort == 0) return null
 
@@ -294,16 +341,20 @@ object SpeedtestManager {
         var reportedConnected = false
 
         try {
-            // Tier 1: Cloudflare. Tier 2+: self-hosted "Speedtest Mini" mirrors known reachable
-            // from this network (see AppConfig.SPEED_TEST_MINI_SERVERS) — PRIMARY and FALLBACK
-            // used to be the exact same URL, so a Cloudflare failure never actually had a
-            // fallback; this gives it one on a different provider/network path.
-            val urls = listOf(AppConfig.SPEED_TEST_UL_PRIMARY, AppConfig.SPEED_TEST_UL_FALLBACK) +
-                AppConfig.SPEED_TEST_MINI_SERVERS.drop(1)
-                    .map { "http://$it${AppConfig.SPEED_TEST_MINI_UL_PATH}" }
+            // Exactly two attempts for "Connecting...": Cloudflare first, then the Previder
+            // mirror as the one fallback — each gets AppConfig.SPEED_TEST_UPLOAD_STALL_TRIGGER_MS
+            // (3 s) before moving on. If both fail, the leg stops immediately and reports a dash,
+            // so "Connecting..." can never sit on screen for more than ~6 s total. (No further
+            // mini-server tiers — that cascade used to let this run far longer.)
+            val urls = listOf(AppConfig.SPEED_TEST_UL_PRIMARY, AppConfig.SPEED_TEST_UL_FALLBACK)
             for ((index, url) in urls.withIndex()) {
                 var conn: HttpURLConnection? = null
                 var watchdog: Timer? = null
+                // Captured BEFORE opening the connection so the "Connecting..." budget below
+                // covers the *whole* attempt (TCP/TLS connect + wait for first accepted write),
+                // not 3 s of connect on top of a separate 3 s stall wait — each server gets ~3 s
+                // all-in.
+                val attemptStart = System.currentTimeMillis()
                 try {
                     conn = (URL(url).openConnection(proxy) as HttpURLConnection).apply {
                         connectTimeout = AppConfig.SPEED_TEST_CONNECT_TIMEOUT_MS
@@ -323,7 +374,7 @@ object SpeedtestManager {
 
                     // Hard backstop: disconnect() from another thread interrupts any blocked
                     // write()/getResponseCode() call, forcing it to throw immediately instead of
-                    // hanging. This is what guarantees "Waiting..." has an absolute ceiling.
+                    // hanging. This is what guarantees the "Uploading..." state has an absolute ceiling.
                     val watchedConn = conn
                     watchdog = Timer(true).apply {
                         schedule(object : TimerTask() {
@@ -339,7 +390,9 @@ object SpeedtestManager {
                     val start     = System.currentTimeMillis()
                     var connected = false
                     var stalled   = false
-                    var lastReportMs = start
+                    var uploadPhaseStart = -1L
+                    var minSpeedChecked  = false
+                    var tooSlow = false
 
                     val output = conn.outputStream
                     try {
@@ -347,12 +400,10 @@ object SpeedtestManager {
                             val now     = System.currentTimeMillis()
                             val elapsed = now - start
 
-                            // Fallback trigger: nothing accepted by the local socket in
-                            // SPEED_TEST_UPLOAD_STALL_TRIGGER_MS. Not the same 3 s threshold used
-                            // for pre-connect reachability — conn.connect() already succeeded, so
-                            // this only needs to catch a server that never reads the body, not a
-                            // slow-but-working uplink.
-                            if (!connected && elapsed >= AppConfig.SPEED_TEST_UPLOAD_STALL_TRIGGER_MS) {
+                            // Fallback trigger: measured from attemptStart (before connect), not
+                            // from start (after connect) — so the whole "Connecting..." attempt
+                            // for this server, TCP connect included, is capped at 3 s total.
+                            if (!connected && (now - attemptStart) >= AppConfig.SPEED_TEST_UPLOAD_STALL_TRIGGER_MS) {
                                 LogUtil.e(AppConfig.TAG, "UL primary stalled before first write, switching to fallback")
                                 stalled = true
                                 break
@@ -360,24 +411,47 @@ object SpeedtestManager {
                             if (elapsed >= AppConfig.SPEED_TEST_DURATION_MS) break
                             if (total  >= AppConfig.SPEED_TEST_MAX_BYTES)    break
 
+                            // Sustained minimum-speed watchdog: mirrors the download-side check.
+                            // Once bytes are actually being accepted (UI is showing "Uploading..."),
+                            // throughput over the first SPEED_TEST_MIN_SPEED_CHECK_MS of that phase
+                            // must clear SPEED_TEST_MIN_UPLOAD_MBPS, checked once at that
+                            // checkpoint. Below the floor, "Uploading..." would otherwise sit on
+                            // screen without a real, useful upload behind it — abort outright and
+                            // report a dash instead of trying another URL.
+                            if (connected && !minSpeedChecked) {
+                                val sinceStart = now - uploadPhaseStart
+                                if (sinceStart >= AppConfig.SPEED_TEST_MIN_SPEED_CHECK_MS) {
+                                    minSpeedChecked = true
+                                    val currentMbps = (total * 8.0 / (sinceStart / 1000.0)) / 1_000_000.0
+                                    if (currentMbps < AppConfig.SPEED_TEST_MIN_UPLOAD_MBPS) {
+                                        LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] $url → below ${AppConfig.SPEED_TEST_MIN_UPLOAD_MBPS} Mbps floor (${"%.2f".format(currentMbps)} Mbps after ${sinceStart}ms), aborting")
+                                        tooSlow = true
+                                        break
+                                    }
+                                }
+                            }
+
                             val chunk = (AppConfig.SPEED_TEST_MAX_BYTES - total)
                                 .coerceAtMost(buffer.size.toLong()).toInt()
                             output.write(buffer, 0, chunk)
                             output.flush()
                             total    += chunk
-                            connected = true
+                            if (!connected) {
+                                connected = true
+                                uploadPhaseStart = now
+                            }
                             if (!reportedConnected) {
                                 reportedConnected = true
                                 onConnected?.invoke()
                             }
+                        }
 
-                            // Live running-average mbps, throttled so we don't flood the UI.
-                            if (onProgress != null && elapsed > 0 &&
-                                now - lastReportMs >= AppConfig.SPEED_TEST_PROGRESS_INTERVAL_MS
-                            ) {
-                                onProgress((total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0)
-                                lastReportMs = now
-                            }
+                        if (tooSlow) {
+                            // Hard stop: skip the graceful close()/ack wait entirely — the
+                            // outer finally{} disconnects immediately so nothing keeps uploading
+                            // in the background. A genuinely too-slow link is a final result
+                            // (dash), not a reason to try another URL.
+                            return null
                         }
 
                         // output.write()/flush() only prove the bytes reached the *local* socket
@@ -407,7 +481,7 @@ object SpeedtestManager {
 
                         val mbps = (total * 8.0 / (elapsed / 1000.0)) / 1_000_000.0
                         LogUtil.e(AppConfig.TAG, "testUploadSpeed[$index] $url → OK: ${"%.1f".format(mbps)} Mbps ($total bytes / ${elapsed}ms)")
-                        return SpeedTestResult(mbps = mbps, bytesTransferred = total, elapsedMs = elapsed)
+                        return SpeedTestResult(mbps = mbps)
 
                     } catch (e: IOException) {
                         // Server closed early, watchdog fired, or the ack never arrived — we
