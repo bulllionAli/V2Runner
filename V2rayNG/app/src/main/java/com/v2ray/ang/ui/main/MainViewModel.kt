@@ -1003,11 +1003,15 @@ class MainViewModel(
             withContext(Dispatchers.Main) {
                 _uiState.update { state ->
                     if (state.speedTestMode != mode) return@update state
-                    val text = if (dlMbps == null && upMbps == null) {
-                        dataSource.getString(R.string.speed_test_failed)
-                    } else {
-                        buildResultText(pingMs, ipLabel, dlMbps, dlFailed, upMbps, upFailed)
-                    }
+                    // Always render via buildResultText, never the generic "Test failed" string
+                    // here: buildResultText already turns each phase that actually ran and
+                    // failed (dlFailed/upFailed) into a dash, and simply omits a phase that was
+                    // never attempted (e.g. UP in a download-only run). Special-casing
+                    // "both null" as a blanket failure was wrong — in DOWNLOAD-only or
+                    // UPLOAD-only mode the untouched metric is always null too, so a single
+                    // failed phase was incorrectly showing "Test failed" instead of the
+                    // expected "Ping: ...  DL: -" / "Ping: ...  UP: -" line.
+                    val text = buildResultText(pingMs, ipLabel, dlMbps, dlFailed, upMbps, upFailed)
                     state.copy(isSpeedTesting = false, speedTestResultText = text)
                 }
             }

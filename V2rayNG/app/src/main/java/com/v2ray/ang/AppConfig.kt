@@ -153,24 +153,26 @@ object AppConfig {
     const val DELAY_TEST_URL2 = "https://www.google.com/generate_204"
     // Primary download test: Hetzner public speed-test file — no rate limit, reliable
     const val SPEED_TEST_DL_PRIMARY   = "https://speed.hetzner.de/100MB.bin"
-    // Fallback download test: Cloudflare (used if primary fails or times out after 3 s).
-    // NOTE: unlike Hetzner's static file, Cloudflare's endpoint requires a "?bytes=N" query
-    // param to actually return a body — without it, it returns little/no data and every
-    // fallback attempt fails. SpeedtestManager appends "?bytes=$SPEED_TEST_MAX_BYTES" to this.
-    const val SPEED_TEST_DL_FALLBACK  = "https://speed.cloudflare.com/__down"
+    // Fallback download test: the nForce "Speedtest Mini" mirror (plain HTTP on port 8080,
+    // same as the entries in SPEED_TEST_MINI_SERVERS below — this host is just promoted out of
+    // that unused pool into the active 2-attempt chain). Swapped in for Cloudflare's __down,
+    // which required a "?bytes=N" query param to return a body; this is a plain static file, so
+    // no query param is needed — SpeedtestManager uses this URL as-is.
+    const val SPEED_TEST_DL_FALLBACK  = "http://mirror.nforce.com:8080/speedtest/random4000x4000.jpg"
 
-    // Upload test target: Cloudflare's dedicated speed-test endpoint. It accepts the POST body
-    // and discards it, returning a tiny JSON response — unlike generic "echo" test endpoints
+    // Upload test target: the nForce "Speedtest Mini" mirror (plain HTTP on port 8080). Swapped
+    // in for Cloudflare's __up endpoint. Like Cloudflare's endpoint, upload.php accepts the POST
+    // body and discards it, returning a tiny reply — unlike generic "echo" test endpoints
     // (httpbin.org/post, postman-echo.com/post, etc.) which mirror the entire request body back
     // in their response. For a 20 MB upload, an echo endpoint means waiting for another ~20+ MB
     // to come back down before we can confirm the upload finished — that's what was causing the
-    // test to sit stuck indefinitely with no ack ever arriving. Cloudflare's endpoint has no such problem.
-    const val SPEED_TEST_UL_PRIMARY   = "https://speed.cloudflare.com/__up"
-    // Real fallback (was a no-op duplicate of PRIMARY before): a public Ookla "Speedtest Mini"
-    // instance found by sniffing which hosts Throne actually reaches from this network
-    // (see SPEED_TEST_MINI_SERVERS below for the rest of that list). If Hetzner/Cloudflare are
-    // throttled or blocked on this network/exit-IP, a self-hosted mirror on ordinary web hosting
-    // is much less likely to be caught by the same blocking rule.
+    // test to sit stuck indefinitely with no ack ever arriving.
+    const val SPEED_TEST_UL_PRIMARY   = "http://mirror.nforce.com:8080/speedtest/upload.php"
+    // Fallback: a public Ookla "Speedtest Mini" instance found by sniffing which hosts Throne
+    // actually reaches from this network (see SPEED_TEST_MINI_SERVERS below for the rest of that
+    // list). If the nForce mirror above is throttled or blocked on this network/exit-IP, this
+    // separate self-hosted mirror on ordinary web hosting is much less likely to be caught by the
+    // same blocking rule.
     const val SPEED_TEST_UL_FALLBACK  = "https://speedtest.previder.net:8080/speedtest/upload.php"
 
     // Self-hosted Ookla "Speedtest Mini" mirrors (the same open-source server package the
@@ -183,13 +185,14 @@ object AppConfig {
     //   download: GET  {host}/speedtest/random4000x4000.jpg   (~4.5 MB image, fetched repeatedly)
     //   upload:   POST {host}/speedtest/upload.php             (raw body, discarded; tiny reply)
     // NOTE: plain HTTP, not HTTPS — these mini installs don't all terminate TLS on 8080.
+    // mirror.nforce.com is deliberately absent here: it's now wired in directly above as
+    // SPEED_TEST_DL_FALLBACK / SPEED_TEST_UL_PRIMARY, so it's no longer just an idle pool entry.
     val SPEED_TEST_MINI_SERVERS = listOf(
         "speedtest.previder.net:8080",
         "nl.tanhost.com:8080",
         "speedtest.redhosting.nl:8080",
         "speedtest.trined.nl:8080",
         "speedtest.matrixdata.nl:8080",
-        "mirror.nforce.com:8080",
         "ookla.snt.utwente.nl:8080",
         "speedtest.vanberkelgroep.nl:8080",
         "speedtest.nl1.mirhosting.net:8080",

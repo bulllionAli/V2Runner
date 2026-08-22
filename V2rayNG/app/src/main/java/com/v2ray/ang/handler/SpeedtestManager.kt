@@ -195,14 +195,14 @@ object SpeedtestManager {
         var reportedConnected = false
 
         try {
-            // Exactly two attempts for "Connecting...": Hetzner first, then Cloudflare as the
-            // one fallback — each gets AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS (3 s) before
+            // Exactly two attempts for "Connecting...": Hetzner first, then the nForce mirror as
+            // the one fallback — each gets AppConfig.SPEED_TEST_FALLBACK_TRIGGER_MS (3 s) before
             // moving on. If both fail to produce data, the leg stops immediately and reports a
             // dash, so "Connecting..." can never sit on screen for more than ~6 s total. (No
             // further mini-server tiers — that cascade used to let this run far longer.)
             val urls = listOf(
                 AppConfig.SPEED_TEST_DL_PRIMARY,
-                "${AppConfig.SPEED_TEST_DL_FALLBACK}?bytes=${AppConfig.SPEED_TEST_MAX_BYTES}"
+                AppConfig.SPEED_TEST_DL_FALLBACK
             )
             for ((index, url) in urls.withIndex()) {
                 var conn: HttpURLConnection? = null
@@ -341,8 +341,8 @@ object SpeedtestManager {
         var reportedConnected = false
 
         try {
-            // Exactly two attempts for "Connecting...": Cloudflare first, then the Previder
-            // mirror as the one fallback — each gets AppConfig.SPEED_TEST_UPLOAD_STALL_TRIGGER_MS
+            // Exactly two attempts for "Connecting...": the nForce mirror first, then the
+            // Previder mirror as the one fallback — each gets AppConfig.SPEED_TEST_UPLOAD_STALL_TRIGGER_MS
             // (3 s) before moving on. If both fail, the leg stops immediately and reports a dash,
             // so "Connecting..." can never sit on screen for more than ~6 s total. (No further
             // mini-server tiers — that cascade used to let this run far longer.)
